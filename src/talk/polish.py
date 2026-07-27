@@ -120,6 +120,47 @@ FEWSHOT: dict[str, dict[str, list[tuple[str, str]]]] = {
 }
 
 
+_verified: set[str] = set()
+
+
+def ensure_model(model: str, *, timeout: float = 3600.0, on_start=None) -> bool:
+    """Baixa o modelo de limpeza se ele ainda não existir localmente.
+
+    Evita transformar `ollama pull` num passo manual de instalação. O Whisper
+    já se vira sozinho pelo cache do Hugging Face; isto dá ao LLM o mesmo
+    tratamento.
+    """
+    if model in _verified:
+        return True
+    try:
+        tags = httpx.get(f"{OLLAMA_URL}/api/tags", timeout=5.0).json()
+    except Exception:
+        return False
+
+    presentes = {m.get("name", "") for m in tags.get("models", [])}
+    # o Ollama guarda sempre com tag; "qwen3" no config é "qwen3:latest" aqui
+    if model in presentes or f"{model}:latest" in presentes:
+        _verified.add(model)
+        return True
+
+    if on_start is not None:
+        on_start()
+    print(f"[polish] baixando {model} (primeira vez)…", file=sys.stderr)
+    try:
+        resp = httpx.post(
+            f"{OLLAMA_URL}/api/pull",
+            json={"model": model, "stream": False},
+            timeout=timeout,
+        )
+        resp.raise_for_status()
+    except Exception as exc:
+        print(f"[polish] não consegui baixar {model}: {exc}", file=sys.stderr)
+        return False
+
+    _verified.add(model)
+    return True
+
+
 def available() -> bool:
     try:
         httpx.get(f"{OLLAMA_URL}/api/tags", timeout=1.0).raise_for_status()

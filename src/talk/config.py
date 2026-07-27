@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import sys
 import tomllib
 from dataclasses import dataclass, fields
@@ -27,7 +28,11 @@ class Config:
     # pós-processamento
     mode: str = "clean"
     llm: str = "qwen3:4b-instruct"
+    # quanto tempo o LLM fica na VRAM depois de usado (repassado ao Ollama)
     keep_alive: str = "5m"
+    # quanto tempo o Whisper fica na VRAM sem uso, antes de o daemon liberá-lo.
+    # "never" o mantém para sempre; "0" libera logo após cada ditada.
+    whisper_keep_alive: str = "5m"
 
     # áudio
     input_device: str | None = None
@@ -48,6 +53,10 @@ class Config:
         return self.vocab or None
 
     @property
+    def whisper_ttl(self) -> float:
+        return parse_duration(self.whisper_keep_alive)
+
+    @property
     def targets(self) -> list[str]:
         """Resolve 'auto': num terminal, imprime; disparado por tecla de
         atalho (sem TTY), cola onde o cursor estiver."""
@@ -58,6 +67,21 @@ class Config:
             if t:
                 out.append(t)
         return out
+
+
+_DURATION = re.compile(r"^\s*(\d+(?:\.\d+)?)\s*([smh]?)\s*$")
+_UNIT = {"": 1, "s": 1, "m": 60, "h": 3600}
+
+
+def parse_duration(value: str | float) -> float:
+    """'5m' → 300 · '30s' → 30 · '0' → 0 · 'never'/'-1' → infinito."""
+    text = str(value).strip().lower()
+    if text in ("never", "-1", "forever", "inf"):
+        return float("inf")
+    match = _DURATION.match(text)
+    if not match:
+        raise ValueError(f"duração inválida: {value!r} (use 30s, 5m, 1h, 0 ou never)")
+    return float(match.group(1)) * _UNIT[match.group(2)]
 
 
 def load() -> Config:
@@ -95,6 +119,8 @@ language = "pt"            # remova para detecção automática
 mode = "clean"             # raw, clean, prompt, note, summary
 llm = "qwen3:4b-instruct"
 keep_alive = "5m"          # quanto tempo o LLM fica na VRAM depois do uso
+whisper_keep_alive = "5m"  # ocioso por esse tempo, o Whisper sai da VRAM
+                           # ("never" mantém sempre; "0" libera após cada ditada)
 
 # 0 = a gravação só para quando você mandar (Enter/Espaço, ou o atalho de novo).
 # Ponha 1.5, por exemplo, para voltar a cortar sozinho após 1,5 s de silêncio.

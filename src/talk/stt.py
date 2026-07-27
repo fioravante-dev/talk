@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import gc
 import re
 import sys
 import zlib
@@ -53,6 +54,23 @@ def _load(model: str, device: str, compute_type: str):
     from faster_whisper import WhisperModel
 
     return WhisperModel(model, device=device, compute_type=compute_type)
+
+
+def is_loaded() -> bool:
+    return _load.cache_info().currsize > 0
+
+
+def unload() -> None:
+    """Libera o modelo da VRAM.
+
+    O CTranslate2 devolve a memória quando o objeto do modelo é coletado, e
+    quem segura a referência é o cache. Limpar o cache sem coletar não libera
+    nada, então o gc.collect() aqui não é supersticioso.
+    """
+    if not is_loaded():
+        return
+    _load.cache_clear()
+    gc.collect()
 
 
 def transcribe(

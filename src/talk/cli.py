@@ -254,6 +254,8 @@ def main(argv: list[str] | None = None) -> int:
         return daemon.serve(cfg)
 
     if not args.file and not args.loop and not args.warmup and not args.no_daemon:
+        # Sobe o daemon na primeira ditada; ele não custa VRAM parado.
+        daemon.ensure_running()
         code = _run_via_daemon(cfg, args)
         if code >= 0:
             return code  # o daemon cuidou; senão segue no modo local
