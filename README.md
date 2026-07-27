@@ -18,9 +18,9 @@ microfone → pw-record → faster-whisper (GPU) → LLM via Ollama → cola no 
 | detecção de voz | Silero VAD v6 | 1,2 MB, na CPU |
 | limpeza do texto | `qwen3:4b-instruct` via Ollama | ~3,1 GB |
 
-Ambos são baixados automaticamente no primeiro uso — não há passo manual de
-download. Em repouso nada fica na VRAM: os modelos carregam quando você dita e
-saem sozinhos depois de ociosos.
+Os dois são baixados por `talk --download`, ou sozinhos na primeira ditada se
+você pular esse passo. Em repouso nada fica na VRAM: carregam quando você dita e
+saem depois de ociosos.
 
 O segundo modelo **não resume** — em ditado, resumir destrói o que você falou.
 Ele edita: pontuação, acentuação, remoção de "é...", "tipo", "né", e conversão de
@@ -110,16 +110,19 @@ personalizados*:
 
 Use o caminho absoluto do seu clone. É só isso — não há serviço para instalar.
 
-### Primeira ditada
-
-Aperte o atalho e fale. Os dois modelos são baixados nesse momento (~4 GB), então
-a primeira vez leva alguns minutos; as notificações mostram o progresso. Para
-tirar essa espera do caminho, baixe antes:
+### 6. Os modelos
 
 ```bash
-talk --warmup                      # Whisper
-ollama pull qwen3:4b-instruct      # modelo de limpeza
+talk --download
 ```
+
+Baixa os dois — Whisper e o modelo de limpeza — num comando só, com barra de
+progresso. São ~4 GB, então leva alguns minutos. Nada é carregado na VRAM: isso
+é preparação de máquina, não uso.
+
+Você pode pular este passo: sem ele, os modelos são baixados sozinhos na
+primeira ditada, e as notificações mostram o andamento. É só a espera que muda
+de lugar.
 
 ---
 

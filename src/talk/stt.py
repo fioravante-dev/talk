@@ -147,7 +147,37 @@ def transcribe(
     )
 
 
-def warmup(model: str, device: str, compute_type: str) -> None:
-    """Carrega o modelo na VRAM (o primeiro uso é o caro)."""
-    whisper = _load(model, device, compute_type)
-    list(whisper.transcribe(np.zeros(16_000, dtype=np.float32), language="pt")[0])
+def download(model: str) -> str:
+    """Só busca os pesos para o cache local. Não toca na GPU.
+
+    Separado do warmup de propósito: baixar é preparar a máquina, carregar é
+    usar a máquina. Quem está instalando não quer ocupar VRAM, e quem tem VRAM
+    ocupada ainda assim precisa conseguir baixar.
+    """
+    from faster_whisper.utils import download_model
+
+    return download_model(model)
+
+
+def warmup(model: str, device: str, compute_type: str) -> bool:
+    """Baixa e carrega o modelo. Devolve se ele ficou residente.
+
+    É melhor esforço de propósito: o objetivo do warmup é tirar o download do
+    caminho, e o download já terminou quando a VRAM entra em cena. Se não há
+    memória agora — um daemon já rodando, um jogo aberto — isso não é motivo
+    para falhar; o modelo entra na primeira ditada.
+    """
+    try:
+        whisper = _load(model, device, compute_type)
+        list(whisper.transcribe(np.zeros(16_000, dtype=np.float32), language="pt")[0])
+        return True
+    except RuntimeError as exc:
+        if "out of memory" not in str(exc).lower():
+            raise
+        unload()
+        print(
+            "[stt] modelo baixado, mas sem VRAM livre para carregá-lo agora; "
+            "ele entrará na primeira ditada.",
+            file=sys.stderr,
+        )
+        return False

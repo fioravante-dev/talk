@@ -63,7 +63,9 @@ exemplos:
     g.add_argument("--json", action="store_true", help="imprime metadados em JSON no stdout")
     g.add_argument("-q", "--quiet", action="store_true", help="sem medidor nem tempos")
     g.add_argument("--loop", action="store_true", help="fica ditando até Ctrl-C")
-    g.add_argument("--warmup", action="store_true", help="carrega os modelos e sai")
+    g.add_argument("--download", action="store_true",
+                   help="baixa os dois modelos e sai (não carrega na VRAM)")
+    g.add_argument("--warmup", action="store_true", help="carrega o modelo na VRAM e sai")
     g.add_argument("--init", action="store_true", help="escreve um config.toml de exemplo")
 
     g = p.add_argument_group("daemon (para atalhos de teclado)")
@@ -214,6 +216,26 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.devices:
         print(audio.list_devices())
+        return 0
+
+    if args.download:
+        cfg = _merge(config.load(), args)
+        print(f"transcrição · {cfg.model}", file=sys.stderr)
+        stt.download(cfg.model)
+        if cfg.mode == "raw":
+            print("modo raw: sem modelo de limpeza para baixar.", file=sys.stderr)
+            return 0
+        print(f"limpeza · {cfg.llm}", file=sys.stderr)
+        if not polish.available():
+            print(
+                "[talk] Ollama não respondeu — só o Whisper foi baixado. "
+                "Suba com `ollama serve` e rode de novo.",
+                file=sys.stderr,
+            )
+            return 1
+        if not polish.ensure_model(cfg.llm, progress=True):
+            return 1
+        print("pronto: os dois modelos estão no disco.", file=sys.stderr)
         return 0
 
     if args.recordings:

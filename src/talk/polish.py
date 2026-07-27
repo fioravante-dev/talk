@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import sys
 
@@ -123,7 +124,36 @@ FEWSHOT: dict[str, dict[str, list[tuple[str, str]]]] = {
 _verified: set[str] = set()
 
 
-def ensure_model(model: str, *, timeout: float = 3600.0, on_start=None) -> bool:
+def _pull_with_progress(model: str, timeout: float) -> bool:
+    """Baixa mostrando o andamento. Sem isso, 2,5 GB em silêncio parecem travar."""
+    with httpx.stream(
+        "POST", f"{OLLAMA_URL}/api/pull",
+        json={"model": model, "stream": True}, timeout=timeout,
+    ) as resp:
+        resp.raise_for_status()
+        for line in resp.iter_lines():
+            if not line.strip():
+                continue
+            evento = json.loads(line)
+            if erro := evento.get("error"):
+                raise RuntimeError(erro)
+            total, feito = evento.get("total"), evento.get("completed")
+            if total and feito:
+                pct = 100 * feito / total
+                barra = "█" * int(pct / 5) + "·" * (20 - int(pct / 5))
+                sys.stderr.write(
+                    f"\r  \033[36m{barra}\033[0m {pct:5.1f}%  "
+                    f"{feito / 1e9:.1f}/{total / 1e9:.1f} GB\033[K"
+                )
+            else:
+                sys.stderr.write(f"\r  {evento.get('status', '')}\033[K")
+            sys.stderr.flush()
+    sys.stderr.write("\r\033[K")
+    return True
+
+
+def ensure_model(model: str, *, timeout: float = 3600.0, on_start=None,
+                 progress: bool = False) -> bool:
     """Baixa o modelo de limpeza se ele ainda não existir localmente.
 
     Evita transformar `ollama pull` num passo manual de instalação. O Whisper
@@ -147,12 +177,14 @@ def ensure_model(model: str, *, timeout: float = 3600.0, on_start=None) -> bool:
         on_start()
     print(f"[polish] baixando {model} (primeira vez)…", file=sys.stderr)
     try:
-        resp = httpx.post(
-            f"{OLLAMA_URL}/api/pull",
-            json={"model": model, "stream": False},
-            timeout=timeout,
-        )
-        resp.raise_for_status()
+        if progress and sys.stderr.isatty():
+            _pull_with_progress(model, timeout)
+        else:
+            httpx.post(
+                f"{OLLAMA_URL}/api/pull",
+                json={"model": model, "stream": False},
+                timeout=timeout,
+            ).raise_for_status()
     except Exception as exc:
         print(f"[polish] não consegui baixar {model}: {exc}", file=sys.stderr)
         return False
