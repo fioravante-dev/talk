@@ -1,0 +1,15 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# Gravações e cache do talk (nunca devem ir para o repositório)
+recordings/
+*.wav
+*.raw

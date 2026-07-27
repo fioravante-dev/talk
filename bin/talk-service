@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+# Liga/desliga o daemon do talk. Feito para ser chamado por clique no menu de
+# aplicativos ou na dock, sem terminal — todo retorno é por notificação.
+set -euo pipefail
+
+UNIT=talk.service
+
+notify() {
+    command -v notify-send >/dev/null || return 0
+    notify-send -a talk -i audio-input-microphone \
+        -h string:x-canonical-private-synchronous:talk-service \
+        -t 3000 "$@" || true
+}
+
+active() { systemctl --user is-active --quiet "$UNIT"; }
+
+case "${1:-toggle}" in
+    toggle)
+        if active; then exec "$0" off; else exec "$0" on; fi
+        ;;
+    on|start)
+        if active; then
+            notify "talk já está ligado"
+        else
+            systemctl --user start "$UNIT"
+            # O daemon emite a própria notificação ("talk pronto") quando o
+            # modelo termina de subir, uns 10 s depois.
+            notify "talk ligando…" "carregando o modelo na GPU"
+        fi
+        ;;
+    off|stop)
+        if active; then
+            systemctl --user stop "$UNIT"
+            notify "talk desligado" "VRAM liberada"
+        else
+            notify "talk já está desligado"
+        fi
+        ;;
+    status)
+        if active; then
+            notify "talk ligado" "$(systemctl --user show -p ActiveEnterTimestamp --value "$UNIT")"
+        else
+            notify "talk desligado"
+        fi
+        ;;
+    *)
+        echo "uso: $(basename "$0") [toggle|on|off|status]" >&2
+        exit 2
+        ;;
+esac

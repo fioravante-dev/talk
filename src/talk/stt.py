@@ -1,0 +1,135 @@
+"""Transcrição com faster-whisper (CTranslate2) na GPU."""
+
+from __future__ import annotations
+
+import re
+import sys
+import zlib
+import time
+from dataclasses import dataclass
+from functools import lru_cache
+
+import numpy as np
+
+from . import cuda
+
+
+@dataclass
+class Transcript:
+    text: str
+    language: str
+    language_probability: float
+    duration: float
+    elapsed: float
+
+
+def _is_degenerate(text: str) -> bool:
+    """Detecta a alucinação em laço do Whisper — '))))))', 'Obrigado. Obrigado.
+    Obrigado.' — que aparece quando ele recebe silêncio ou ruído.
+
+    Texto humano não comprime tão bem; um laço, sim.
+    """
+    stripped = text.strip()
+    if len(stripped) < 16:
+        return False
+
+    # Pouquíssimos caracteres distintos: '))))', '... ... ...'
+    if len(set(stripped) - {" "}) <= 3:
+        return True
+
+    # Poucas palavras distintas: a mesma frase repetida em laço. Em texto curto
+    # o zlib não chega a comprimir o bastante para acusar isso sozinho.
+    words = re.findall(r"\w+", stripped.lower())
+    if len(words) >= 6 and len(set(words)) / len(words) < 0.4:
+        return True
+
+    raw = stripped.encode()
+    return len(raw) / len(zlib.compress(raw, 1)) > 3.5
+
+
+@lru_cache(maxsize=2)
+def _load(model: str, device: str, compute_type: str):
+    cuda.preload()
+    from faster_whisper import WhisperModel
+
+    return WhisperModel(model, device=device, compute_type=compute_type)
+
+
+def transcribe(
+    audio: np.ndarray,
+    *,
+    model: str = "large-v3-turbo",
+    device: str = "cuda",
+    compute_type: str = "int8_float16",
+    language: str | None = "pt",
+    initial_prompt: str | None = None,
+    beam_size: int = 5,
+) -> Transcript:
+    started = time.monotonic()
+
+    # Rede de segurança: o Whisper normaliza o espectrograma por seu máximo, e
+    # um único NaN na entrada transforma TODA a matriz de features em NaN — a
+    # transcrição vira um fragmento sem sentido. Vale mais perder uma amostra
+    # do que a frase inteira.
+    if not np.isfinite(audio).all():
+        bad = int((~np.isfinite(audio)).sum())
+        print(f"[stt] {bad} amostra(s) inválida(s) no áudio; zeradas.", file=sys.stderr)
+        audio = np.nan_to_num(audio, nan=0.0, posinf=0.0, neginf=0.0)
+
+    try:
+        whisper = _load(model, device, compute_type)
+    except Exception as exc:  # GPU indisponível / libs CUDA faltando
+        if device != "cpu":
+            print(f"[stt] GPU indisponível ({exc}); caindo para CPU.", file=sys.stderr)
+            whisper = _load(model, "cpu", "int8")
+        else:
+            raise
+
+    def keep(segment) -> bool:
+        # O VAD deixa passar ruído baixo, e aí o Whisper "ouve" fala onde não
+        # há. Essas duas medidas são as que ele próprio usa para se autoavaliar.
+        return segment.no_speech_prob < 0.7 and segment.compression_ratio < 2.4
+
+    def run(engine):
+        segments, info = engine.transcribe(
+            audio,
+            language=language,
+            beam_size=beam_size,
+            initial_prompt=initial_prompt,
+            vad_filter=True,
+            vad_parameters={"min_silence_duration_ms": 500},
+            # ditado são falas curtas e independentes: arrastar contexto entre
+            # segmentos é a principal fonte de alucinação em loop do Whisper.
+            condition_on_previous_text=False,
+        )
+        # A geração é preguiçosa: só aqui a GPU é realmente exercitada, então é
+        # aqui que um out-of-memory aparece — não no carregamento do modelo.
+        text = " ".join(s.text.strip() for s in segments if keep(s)).strip()
+        return ("" if _is_degenerate(text) else text), info
+
+    try:
+        text, info = run(whisper)
+    except RuntimeError as exc:
+        if "out of memory" not in str(exc).lower() or device == "cpu":
+            raise
+        # Numa placa pequena isso acontece quando um jogo ou outro modelo já
+        # tomou a VRAM. Transcrever devagar é muito melhor que perder a fala.
+        print(
+            "[stt] sem VRAM disponível; refazendo na CPU (mais lento).",
+            file=sys.stderr,
+        )
+        text, info = run(_load(model, "cpu", "int8"))
+
+    return Transcript(
+        text=text,
+        language=info.language,
+        language_probability=info.language_probability,
+        duration=info.duration,
+        elapsed=time.monotonic() - started,
+    )
+
+
+def warmup(model: str, device: str, compute_type: str) -> None:
+    """Carrega o modelo na VRAM (o primeiro uso é o caro)."""
+    whisper = _load(model, device, compute_type)
+    list(whisper.transcribe(np.zeros(16_000, dtype=np.float32), language="pt")[0])
