@@ -209,7 +209,11 @@ vocab = "Kubernetes, PostgreSQL, Terraform, faster-whisper, systemd"
 ### Controle do daemon
 
 O daemon sobe sozinho na primeira ditada e mantém o modelo quente entre uma e
-outra. Parado, ele não ocupa VRAM.
+outra. Não há nada para instalar nem serviço para habilitar: o cliente o cria
+quando não encontra nenhum, herdando o ambiente gráfico de quem chamou — que é
+justamente o que o clipboard e as notificações precisam.
+
+Parado, ele não ocupa VRAM, só o processo.
 
 ```bash
 talk --status    # de pé?
@@ -217,6 +221,8 @@ talk --stop      # encerra a gravação em andamento
 talk --quit      # desliga
 talk --no-daemon # ignora o daemon nesta chamada
 ```
+
+O log dele fica em `~/.cache/talk/daemon.log`.
 
 ---
 
