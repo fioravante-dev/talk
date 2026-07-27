@@ -31,8 +31,13 @@ Resumir existe como modo opcional.
 
 ## Instalação
 
-Testado em Pop!_OS 24.04 (COSMIC/Wayland) com GPU NVIDIA. Sem GPU, cai para CPU
-automaticamente. Deve funcionar em qualquer distro com PipeWire.
+Testado em Pop!_OS 24.04 (COSMIC/Wayland). Deve funcionar em qualquer distro com
+PipeWire.
+
+**Pré-requisitos:** driver NVIDIA instalado (`nvidia-smi` precisa responder) e
+cerca de **7 GB de disco** — 2,6 GB de dependências Python, das quais a maior
+parte são as bibliotecas CUDA, mais 1,6 GB do Whisper e 2,5 GB do modelo de
+limpeza. Sem GPU funciona igual, só bem mais devagar, na CPU.
 
 ### 1. Dependências do sistema
 
@@ -53,6 +58,9 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 curl -fsSL https://ollama.com/install.sh | sh
 ```
 
+O instalador do `uv` acrescenta `~/.local/bin` ao seu PATH, mas só nas sessões
+seguintes — **reabra o terminal** antes de continuar.
+
 ### 3. O projeto
 
 ```bash
@@ -60,6 +68,16 @@ git clone https://github.com/fioravante-dev/talk.git
 cd talk
 uv sync
 ```
+
+O comando fica em `.venv/bin/talk`, dentro do clone. Para chamá-lo de qualquer
+lugar:
+
+```bash
+mkdir -p ~/.local/bin
+ln -s "$PWD/.venv/bin/talk" ~/.local/bin/talk
+```
+
+Sem isso, use `uv run talk` de dentro do diretório do projeto.
 
 ### 4. Permissão do /dev/uinput
 
@@ -91,6 +109,17 @@ personalizados*:
 | `Super+Alt+D` | `/CAMINHO/PARA/talk/.venv/bin/talk -l en` |
 
 Use o caminho absoluto do seu clone. É só isso — não há serviço para instalar.
+
+### Primeira ditada
+
+Aperte o atalho e fale. Os dois modelos são baixados nesse momento (~4 GB), então
+a primeira vez leva alguns minutos; as notificações mostram o progresso. Para
+tirar essa espera do caminho, baixe antes:
+
+```bash
+talk --warmup                      # Whisper
+ollama pull qwen3:4b-instruct      # modelo de limpeza
+```
 
 ---
 
