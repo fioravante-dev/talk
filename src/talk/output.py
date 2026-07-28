@@ -173,6 +173,8 @@ def deliver(text: str, targets: list[str], *, paste_key: str = "ctrl+v") -> list
 
     for err in errors:
         print(f"[output] {err}", file=sys.stderr)
-    if not delivered:
+    # Lista vazia não é falha: é o caso de quem pediu só stdout, que o cliente
+    # imprime por conta própria. Só há erro se algo foi pedido e nada funcionou.
+    if targets and not delivered:
         raise OutputError("; ".join(errors) or "nenhum destino de saída funcionou")
     return delivered

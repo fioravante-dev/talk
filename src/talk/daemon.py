@@ -16,6 +16,7 @@ Protocolo: uma linha JSON por requisição, uma linha JSON de resposta.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -94,6 +95,10 @@ class Daemon:
         self.stop_recording = threading.Event()
         self.lock = threading.Lock()
         self.last_used = time.monotonic()
+        # Congelado na subida: é o código REALMENTE carregado neste processo.
+        # Recalcular a cada ping leria os arquivos já editados no disco, e um
+        # daemon obsoleto se declararia atual — que era o defeito original.
+        self.code = code_stamp()
 
     # -- ciclo de vida do modelo -----------------------------------------
 
@@ -233,7 +238,8 @@ class Daemon:
     def handle(self, req: dict) -> dict:
         cmd = req.get("cmd", "dictate")
         if cmd == "ping":
-            return {"status": "ok", "recording": self.recording.is_set()}
+            return {"status": "ok", "recording": self.recording.is_set(),
+                    "code": self.code}
         if cmd == "stop":
             self.stop_recording.set()
             return {"status": "ok"}
@@ -298,11 +304,26 @@ def _respond(daemon: Daemon, conn: socket.socket, req: dict) -> None:
         try:
             resp = daemon.handle(req)
         except Exception as exc:  # nunca derruba o daemon por causa de um pedido
+            # Sem terminal, um erro só existe se for notificado.
+            notify("⚠ Erro interno", repr(exc))
             resp = {"status": "error", "error": repr(exc)}
         try:
             conn.sendall((json.dumps(resp, ensure_ascii=False) + "\n").encode())
         except OSError:
             pass
+
+
+def code_stamp() -> str:
+    """Impressão digital do código-fonte carregado.
+
+    O daemon é um processo longo: ele congela o código de quando subiu. Editar
+    um módulo e apertar o atalho executa a versão velha, e a falha aparece como
+    "não fez nada" — sem terminal, o erro do cliente não é visto por ninguém.
+    Comparar isto deixa o cliente reiniciar um daemon obsoleto sozinho.
+    """
+    raiz = Path(__file__).parent
+    marcas = sorted(f"{p.name}:{p.stat().st_mtime_ns}" for p in raiz.glob("*.py"))
+    return hashlib.sha256("|".join(marcas).encode()).hexdigest()[:16]
 
 
 def ensure_running(timeout: float = 15.0) -> bool:
@@ -313,8 +334,18 @@ def ensure_running(timeout: float = 15.0) -> bool:
     herda o ambiente gráfico de quem o chamou — que é justamente o que o
     clipboard e as notificações precisam.
     """
-    if ping() is not None:
-        return True
+    estado = ping()
+    if estado is not None:
+        if estado.get("code") == code_stamp():
+            return True
+        # Daemon obsoleto: derruba e sobe de novo com o código atual. Barato,
+        # porque parado ele não segura VRAM.
+        print("[talk] daemon rodando código antigo; reiniciando.", file=sys.stderr)
+        request({"cmd": "quit"}, timeout=5.0)
+        for _ in range(50):
+            if ping() is None:
+                break
+            time.sleep(0.1)
 
     log = recordings_dir().parent / "daemon.log"
     log.parent.mkdir(parents=True, exist_ok=True)
