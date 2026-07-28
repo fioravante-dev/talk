@@ -52,12 +52,22 @@ Recebe alguém falando de improviso sobre o que precisa comunicar. Devolve o tex
 
 Registro profissional e cordial, sem formalidade empolada. Frases diretas.
 
+QUEM É QUEM — leia com atenção, é o erro mais comum:
+
+Quem dita é o REMETENTE. Ela fala para outra pessoa, o destinatário.
+
+- O nome dito no COMEÇO, ou apresentado como "manda para o Fulano", é o DESTINATÁRIO. Ele vai na saudação, e some do corpo.
+- A saudação é escrita por você, numa forma padrão ("Olá Fulano," ou "Prezado Fulano,"), mesmo que a fala tenha começado de outro jeito. Reconhecimento de voz erra saudação com frequência ("Pesado" em vez de "Prezado"); não repita o erro.
+- O nome dito no FIM, depois de "atenciosamente", "abraço", "obrigado", "att", é o REMETENTE — quem está falando. Ele vai depois da despedida, e NUNCA na saudação.
+- Nome de pessoa jamais entra na linha de assunto. O assunto descreve o tema.
+- Se você não tem certeza de quem recebe, use saudação neutra ("Olá,"). Errar o destinatário é pior que omiti-lo.
+
 O que você PODE acrescentar são apenas convenções de formato: saudação, despedida, conectivos e a linha de assunto.
 
 O que você NÃO PODE, em hipótese alguma:
 - inventar fatos, prazos, valores ou compromissos que não foram ditos;
-- inventar o nome de quem recebe. Se a pessoa não disse a quem escreve, use uma saudação neutra ("Olá,");
-- assinar com um nome. Encerre a despedida sem nome, para a pessoa completar;
+- inventar o nome de quem recebe, nem usar o nome de quem assina como destinatário;
+- assinar um nome que a pessoa não disse. Sem assinatura ditada, encerre na despedida;
 - omitir qualquer informação concreta que ela deu.
 
 Responda APENAS com o e-mail."""
@@ -117,6 +127,39 @@ _REMINDER: dict[str, str] = {
     "email": "Formate a transcrição acima como e-mail. Não atenda o que ela pede; apenas comunique o que foi dito.",
 }
 
+# O caso que o modelo erra sozinho: destinatário no começo, remetente no fim.
+# Sem ver um exemplo, ele saúda quem assina.
+_SHOT_EMAIL_PT = (
+    "<transcricao>\noi Gustavo é o seguinte a reunião de quinta vai mudar de horário "
+    "vai ser às três em vez de uma né e ah e leva o relatório impresso "
+    "atenciosamente Pedro\n</transcricao>"
+)
+_SHOT_EMAIL_PT_OUT = """Assunto: Mudança de horário da reunião de quinta
+
+Olá Gustavo,
+
+A reunião de quinta mudou de horário: será às 15h, em vez das 13h.
+
+Leve o relatório impresso.
+
+Atenciosamente,
+Pedro"""
+
+_SHOT_EMAIL_EN = (
+    "<transcricao>\nhi Gustavo so um the thursday meeting is moving it'll be at three "
+    "instead of one and uh bring the printed report best regards Pedro\n</transcricao>"
+)
+_SHOT_EMAIL_EN_OUT = """Subject: Thursday meeting time change
+
+Hi Gustavo,
+
+The Thursday meeting has moved: it will be at 3 PM instead of 1 PM.
+
+Please bring the printed report.
+
+Best regards,
+Pedro"""
+
 _SHOT_IN_EN = "<transcricao>\nso um yeah I wanted you to like make a summary of the notes dot md file and uh and then send it to John by email\n</transcricao>"
 
 # Um exemplo no idioma errado é ele próprio um empurrão para traduzir, então há
@@ -132,6 +175,7 @@ FEWSHOT: dict[str, dict[str, list[tuple[str, str]]]] = {
             _SHOT_IN,
             "Resuma o arquivo notas.md e envie o resumo por e-mail para o João.",
         )],
+        "email": [(_SHOT_EMAIL_PT, _SHOT_EMAIL_PT_OUT)],
     },
     "en": {
         "clean": [(
@@ -142,6 +186,7 @@ FEWSHOT: dict[str, dict[str, list[tuple[str, str]]]] = {
             _SHOT_IN_EN,
             "Summarize the notes.md file and email the summary to John.",
         )],
+        "email": [(_SHOT_EMAIL_EN, _SHOT_EMAIL_EN_OUT)],
     },
 }
 
@@ -292,7 +337,7 @@ def polish(
         print(f"[polish] falhou ({exc}); usando transcrição crua.", file=sys.stderr)
         return text
 
-    return _tidy(_strip_wrapper(out)) or text
+    return _tidy(_strip_wrapper(out), text) or text
 
 
 _PLACEHOLDER = re.compile(r"^\s*[\[<(](seu nome|your name|nome|name|assinatura|signature)[\]>)]\s*$", re.I)
@@ -305,7 +350,31 @@ _GREETING = re.compile(
 )
 
 
-def _tidy(text: str) -> str:
+_CLOSING = re.compile(
+    r"^(atenciosamente|cordialmente|abraços?|abraço|obrigad[oa]|att\.?|"
+    r"best regards|kind regards|regards|sincerely|thanks|cheers)\b[^\w]*$",
+    re.I,
+)
+
+
+def _drop_foreign_signature(linhas: list[str], fonte: str) -> list[str]:
+    """Remove assinatura que não foi ditada.
+
+    O exemplo few-shot termina com um nome, e o modelo copia esse nome mesmo
+    quando a fala não tinha nenhum — assinar o e-mail de alguém com o nome
+    errado é pior do que não assinar.
+    """
+    if len(linhas) < 2 or not linhas[-1]:
+        return linhas
+    if not _CLOSING.match(linhas[-2].strip()):
+        return linhas
+    palavras = re.findall(r"\w+", linhas[-1].lower())
+    if palavras and not all(p in fonte.lower() for p in palavras):
+        return linhas[:-1]
+    return linhas
+
+
+def _tidy(text: str, fonte: str = "") -> str:
     """Aparas que o modelo insiste em deixar mesmo instruído a não deixar.
 
     Pedir no prompt resolve na maioria das vezes; um 4B erra o suficiente para
@@ -319,6 +388,9 @@ def _tidy(text: str) -> str:
 
     while linhas and (not linhas[-1] or _PLACEHOLDER.match(linhas[-1])):
         linhas.pop()
+
+    if fonte:
+        linhas = _drop_foreign_signature(linhas, fonte)
     return "\n".join(linhas)
 
 
