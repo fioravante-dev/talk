@@ -107,6 +107,7 @@ personalizados*:
 |---|---|
 | `Super+D` | `/CAMINHO/PARA/talk/.venv/bin/talk -l pt` |
 | `Super+Alt+D` | `/CAMINHO/PARA/talk/.venv/bin/talk -l en` |
+| `Super+Shift+D` | `/CAMINHO/PARA/talk/.venv/bin/talk -l pt -m email` |
 
 Use o caminho absoluto do seu clone. É só isso — não há serviço para instalar.
 
@@ -141,6 +142,7 @@ talk -m prompt --to clipboard # vira um prompt bem-formado e copia
 talk --loop                   # ditado contínuo até Ctrl-C
 talk -f reuniao.m4a -m note   # transcreve um arquivo e organiza como nota
 talk -l en                    # ditado em inglês
+talk -m email                 # vira um e-mail formatado
 ```
 
 **A gravação vai até você mandar parar** — `Enter` ou `Espaço` no terminal, ou o
@@ -156,6 +158,7 @@ tecla. Para cortar por silêncio, `--silence-secs 1.5`.
 | `clean` | pontuação e limpeza, preservando suas palavras (padrão) |
 | `prompt` | transforma fala solta em um pedido claro para um assistente |
 | `note` | organiza como nota em markdown |
+| `email` | formata como e-mail: assunto, saudação, parágrafos, despedida |
 | `summary` | resume em bullets |
 
 ### Saída (`--to`)

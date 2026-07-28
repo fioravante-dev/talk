@@ -51,7 +51,7 @@ exemplos:
     g = p.add_argument_group("pós-processamento")
     g.add_argument(
         "-m", "--mode",
-        choices=["raw", "clean", "prompt", "note", "summary"],
+        choices=["raw", "clean", "prompt", "note", "summary", "email"],
         help="raw não usa LLM (padrão: clean)",
     )
     g.add_argument("--llm", help="modelo do Ollama para a limpeza")
