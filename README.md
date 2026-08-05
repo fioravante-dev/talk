@@ -21,7 +21,7 @@ palavra-chave ↗
 | detecção de voz | Silero VAD v6 | 1,2 MB, na CPU |
 | limpeza do texto | `qwen3:4b-instruct` via Ollama | ~3,1 GB |
 | palavra-chave (opcional) | `hey_jarvis` via openWakeWord | ~3,7 MB, na CPU |
-| leitura em voz alta (opcional) | Kokoro-82M (ou Piper, o leve) | ~347 MB, na CPU |
+| leitura em voz alta (opcional) | Piper `faber` (ou Kokoro-82M) | ~121 MB, na CPU |
 
 Os dois são baixados por `talk --download`, ou sozinhos na primeira ditada se
 você pular esse passo. Em repouso nada fica na VRAM: carregam quando você dita e
@@ -209,7 +209,7 @@ Os principais:
 | `wake` | `false` | ouvinte de palavra-chave (veja a seção abaixo) |
 | `wake_threshold` | `0.5` | limiar de disparo; calibre com `--wake-test` |
 | `wake_silence_secs` | `2.0` | silêncio que encerra a ditada aberta por voz |
-| `voz_motor` | `kokoro` | motor de síntese; `piper` é o leve |
+| `voz_motor` | `piper` | motor de síntese; `kokoro` é o alternativo |
 | `voz_velocidade` | `1.0` | velocidade da leitura em voz alta |
 | `read_language` | `auto` | voz da leitura; `auto` escolhe pelo texto |
 
@@ -371,8 +371,8 @@ você ter como perceber.
 ### Ligar
 
 ```bash
-uv sync --extra voz     # no diretório do projeto
-talk --download         # baixa o modelo (~337 MB)
+uv sync --extra voz-leve   # no diretório do projeto
+talk --download            # baixa as vozes (~121 MB)
 ```
 
 Registre um atalho, do mesmo jeito que os de ditado:
@@ -407,30 +407,44 @@ português e inglês. Para fixar, `read_language = "pt"` no config.
 
 ### Dois motores
 
-O padrão é o **Kokoro**, que venceu um teste cego pareado contra o Piper — a
-mesma frase longa, tocada alternada, sem o ouvinte saber qual era qual. Mas o
-**Piper** segue suportado, e não por nostalgia: em máquina fraca, em container,
-ou num projeto onde 347 MB não cabem, ele é a escolha certa.
+O padrão é o **Piper**. Ele soa mais sintético que o Kokoro num trecho curto —
+e num teste cego pareado o Kokoro ganhou. Mas em uso real o Kokoro **engasga em
+texto corrido**, e uma pausa no meio da frase incomoda mais do que um timbre
+menos natural.
 
-| | `kokoro` (padrão) | `piper` (leve) |
+| | `piper` (padrão) | `kokoro` |
 |---|---|---|
-| disco | 347 MB, um modelo serve 54 vozes | **61 MB por voz** |
-| síntese | ~4,5x o tempo real | **~25x o tempo real** |
-| primeira amostra | ~700 ms (só a 1ª leitura) | **233 ms** |
-| taxa | 24 kHz | 22,05 kHz |
-| naturalidade | **melhor** | mais sintético |
-| licença | Apache 2.0 | MIT |
-| vozes pt-BR | `pm_alex`, `pf_dora` | `faber`, `cadu`, `jeff` |
+| disco | **61 MB por voz** | 347 MB, um modelo serve 54 vozes |
+| síntese | **~25x o tempo real** | ~4,5x o tempo real |
+| primeira amostra | **233 ms** | ~700 ms (só a 1ª leitura) |
+| fluidez em texto longo | **contínua** | engasga entre frases |
+| naturalidade (trecho curto) | mais sintético | **melhor** |
+| taxa | 22,05 kHz | 24 kHz |
+| licença | MIT | Apache 2.0 |
+| vozes pt-BR | `faber`, `cadu`, `jeff` | `pm_alex`, `pf_dora` |
 
-Para trocar:
+**Por que o Kokoro engasga:** a síntese aqui é frase a frase, e o Kokoro produz
+a frase inteira de uma vez. A 4,5x o tempo real, sintetizar a próxima demora o
+bastante para o player secar no fim da atual — some uma fração de segundo entre
+as frases. O Piper a 25x nunca chega perto disso. Não é defeito do modelo: é
+falta de adiantar a síntese da frase seguinte enquanto a atual toca. Quem for
+mexer nisso, é aí que está o conserto.
+
+Para experimentar o Kokoro assim mesmo:
 
 ```bash
-uv sync --extra voz-leve
+uv sync --extra voz
 ```
 
 ```toml
-voz_motor = "piper"
-voz_cadencia = 1.2       # variação de duração dos fonemas; >1.5 dá tremido
+voz_motor = "kokoro"
+```
+
+Para ajustar o Piper:
+
+```toml
+voz_pt = "pt_BR-cadu-medium"   # ou jeff; faber é o padrão
+voz_cadencia = 1.2             # variação de duração dos fonemas; >1.5 dá tremido
 ```
 
 Os dois rodam em ONNX na **CPU** e não disputam VRAM com o Whisper nem com o
@@ -447,8 +461,8 @@ Duas armadilhas que custaram tempo, registradas para quem for reaproveitar:
 
 ### O que custa
 
-- **347 MB** do Kokoro em `~/.cache/talk/voices/kokoro/` (ou 61 MB por voz do
-  Piper, em `~/.cache/talk/voices/`).
+- **61 MB por voz** do Piper em `~/.cache/talk/voices/` (ou 347 MB do Kokoro,
+  em `~/.cache/talk/voices/kokoro/`).
 - **Zero VRAM.** Os dois rodam na CPU; o Whisper e o LLM seguem donos da GPU.
 - A síntese nunca é o gargalo — a reprodução é. Por isso ela é frase a frase e
   vai direto para o player, em vez de esperar o texto inteiro.
