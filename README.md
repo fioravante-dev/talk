@@ -21,6 +21,7 @@ palavra-chave ↗
 | detecção de voz | Silero VAD v6 | 1,2 MB, na CPU |
 | limpeza do texto | `qwen3:4b-instruct` via Ollama | ~3,1 GB |
 | palavra-chave (opcional) | `hey_jarvis` via openWakeWord | ~3,7 MB, na CPU |
+| leitura em voz alta (opcional) | Piper `faber` (pt) e `lessac` (en) | ~121 MB, na CPU |
 
 Os dois são baixados por `talk --download`, ou sozinhos na primeira ditada se
 você pular esse passo. Em repouso nada fica na VRAM: carregam quando você dita e
@@ -208,6 +209,8 @@ Os principais:
 | `wake` | `false` | ouvinte de palavra-chave (veja a seção abaixo) |
 | `wake_threshold` | `0.5` | limiar de disparo; calibre com `--wake-test` |
 | `wake_silence_secs` | `2.0` | silêncio que encerra a ditada aberta por voz |
+| `voz_velocidade` | `1.0` | velocidade da leitura em voz alta |
+| `read_language` | `auto` | voz da leitura; `auto` escolhe pelo texto |
 
 `whisper_keep_alive` aceita `30s`, `5m`, `1h`, `0` (libera após cada ditada) ou
 `never` (mantém sempre). Com o padrão de 5 minutos, ditadas em sequência são
@@ -354,6 +357,72 @@ CC-BY-NC-SA 4.0** — uso não comercial. É por isso que eles são baixados par
 
 ---
 
+## Ler em voz alta
+
+O caminho inverso do resto do projeto: em vez de voz virar texto, texto vira
+voz. Você destaca um trecho com o mouse, aperta o atalho, e ele lê.
+
+**É leitura da seleção, não da tela.** A diferença importa: o texto lido é
+exatamente o que está lá, sem OCR no meio. Num recurso usado justamente quando
+você não está olhando para o monitor, um erro de reconhecimento passaria sem
+você ter como perceber.
+
+### Ligar
+
+```bash
+uv sync --extra voz     # no diretório do projeto
+talk --download         # baixa as duas vozes (~121 MB)
+```
+
+Registre um atalho, do mesmo jeito que os de ditado:
+
+| tecla sugerida | comando |
+|---|---|
+| `Super+L` | `/CAMINHO/PARA/talk/.venv/bin/talk --read` |
+
+### Como funciona
+
+Destaque o texto e acione. **O mesmo atalho cala** — é o liga/desliga da
+ditada, e o único jeito de descobrir que era o texto errado é ouvir os
+primeiros segundos, então a saída precisa estar a um toque.
+
+A notificação mostra o começo do texto e a duração estimada antes de começar
+(`🔊 Lendo · PT · ~2 min`). Não há limite de tamanho: truncar calado esconderia
+a perda. Se nada estiver destacado, ele avisa em vez de ficar mudo.
+
+A voz é escolhida pelo texto — uma contagem de palavras funcionais decide entre
+português e inglês. Para fixar, `read_language = "pt"` no config.
+
+**Três coisas param a leitura:**
+
+- o mesmo atalho, ou `talk --stop`;
+- **começar uma ditada** (por tecla ou por voz) — falar por cima da máquina
+  nunca é a intenção, e o microfone captaria o próprio Piper;
+- **a palavra-chave**, se você a tiver ligada. Durante a leitura, dizer
+  "hey jarvis" significa *calar*, não ditar. Isso te dá interrupção por voz sem
+  tirar a mão do que está fazendo, e resolve por construção o fato de o
+  alto-falante alimentar o microfone: se o próprio texto lido disparar o
+  detector, a consequência é ele se calar — o que remove a causa.
+
+### O que custa
+
+- **~121 MB** das duas vozes, em `~/.cache/talk/voices/`.
+- **Zero VRAM.** O Piper roda na CPU; o Whisper e o LLM seguem donos da GPU.
+- Medido nesta máquina: 233 ms até a primeira amostra, e a síntese roda a ~25x
+  o tempo real — a reprodução é sempre o gargalo, nunca o modelo.
+- O texto passa por uma limpeza determinística antes: URL vira "link", markdown
+  perde os marcadores, bloco de código é pulado. Regras fixas, não um LLM —
+  ele poderia reescrever, e o ponto é ler o que está lá.
+
+### Uma armadilha que não tem cura
+
+A seleção primária **não tem idade**. Ela guarda o último trecho que você
+destacou, seja há dois segundos ou há duas horas, e o programa não tem como
+distinguir. Por isso a notificação mostra o começo do texto: se vier algo de
+vinte minutos atrás, você vê na hora e cala num toque.
+
+---
+
 ## A fala nunca se perde
 
 O áudio vai para o disco **enquanto** é capturado, antes de qualquer modelo ser
@@ -378,6 +447,7 @@ src/talk/
   daemon.py   socket unix, ciclo de vida do modelo, notificações
   audio.py    captura via pw-record, fluxo compartilhado, gravação em disco
   wake.py     ouvinte de palavra-chave, openWakeWord em ONNX (opcional)
+  voz.py      leitura em voz alta com Piper, síntese frase a frase (opcional)
   stt.py      faster-whisper, fallback para CPU, filtro de alucinação
   polish.py   prompts do LLM, anti-injeção, fixação de idioma
   output.py   stdout / clipboard / paste / type, com fallbacks

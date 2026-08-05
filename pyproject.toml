@@ -35,6 +35,11 @@ wake = [
     # onnxruntime e tqdm já entram como transitivos do faster-whisper
 ]
 
+# Leitura em voz alta. Também opcional: são ~126 MB de vozes e um motor de
+# síntese que só serve a quem usa o recurso. O Piper roda na CPU e não disputa
+# VRAM com o Whisper nem com o LLM.
+voz = ["piper-tts>=1.4.2"]
+
 [project.scripts]
 talk = "talk.cli:main"
 

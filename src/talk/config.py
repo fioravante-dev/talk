@@ -63,6 +63,14 @@ class Config:
     wake_grace_secs: float = 5.0
     wake_skip_secs: float = 0.0  # suba se o rabo da palavra vazar na transcrição
 
+    # leitura em voz alta — o caminho inverso do resto do projeto.
+    # Lê o que você SELECIONOU, não a tela. O Piper roda na CPU, então isto não
+    # disputa VRAM com o Whisper nem com o LLM.
+    voz_pt: str = "pt_BR-faber-medium"
+    voz_en: str = "en_US-lessac-medium"
+    voz_velocidade: float = 1.0  # 1.5 fala mais rápido; 0.8 mais devagar
+    read_language: str = "auto"  # auto detecta pelo texto; ou "pt"/"en" fixo
+
     # saída
     to: str = "auto"
     # Combinação de colar. Terminais costumam usar ctrl+shift+v.
@@ -182,6 +190,14 @@ wake_min_speech_secs = 0.5 # fala somada antes de o corte por silêncio valer �
                            # o rabo da palavra-chave sozinho não conta como fala
 wake_grace_secs = 5.0      # sem essa fala mínima nesse prazo: era ruído
 wake_skip_secs = 0.0       # suba para 0.2 se "Jarvis" vazar na transcrição
+
+# --- leitura em voz alta ---------------------------------------------------
+# Lê o texto que você SELECIONOU (destacado com o mouse), não a tela. Exige
+# `uv sync --extra voz` e `talk --download`. O Piper roda na CPU: nada de VRAM.
+voz_pt = "pt_BR-faber-medium"   # ou cadu, edresson, jeff
+voz_en = "en_US-lessac-medium"
+voz_velocidade = 1.0       # 1.5 fala mais rápido; 0.8 mais devagar
+read_language = "auto"     # auto escolhe a voz pelo texto; ou "pt"/"en" fixo
 
 to = "auto"                # auto, stdout, clipboard, paste, type
 paste_key = "ctrl+v"       # ctrl+shift+v se o alvo for um terminal

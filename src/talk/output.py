@@ -29,8 +29,39 @@ _PASTE = (
 )
 
 
+# O caminho inverso: ler o que está selecionado, para a leitura em voz alta.
+# É a seleção PRIMÁRIA — o texto que você acabou de destacar com o mouse, sem
+# precisar de Ctrl+C. O clipboard não serve aqui: obrigaria a copiar antes e
+# atropelaria o que você tivesse guardado para outra finalidade.
+_SELECTION = (
+    (["wl-paste", "--primary", "--no-newline"], "wl-clipboard"),
+    (["xclip", "-selection", "primary", "-out"], "xclip"),
+    (["xsel", "--primary", "--output"], "xsel"),
+)
+
+
 class OutputError(RuntimeError):
     pass
+
+
+def selecao() -> str:
+    """Texto destacado agora. Vazio se não houver nada.
+
+    A seleção primária não tem idade: ela guarda o último trecho destacado,
+    seja há dois segundos ou há duas horas, e não há como distinguir. Quem
+    chama precisa mostrar o que vai fazer com ela antes de fazer.
+    """
+    argv, _ = _first_available(_SELECTION)
+    if argv is None:
+        raise OutputError("nenhuma ferramenta de seleção — instale wl-clipboard")
+    try:
+        out = subprocess.run(argv, capture_output=True, timeout=5)
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
+    # Seleção vazia faz o wl-paste sair com erro; isso não é falha, é ausência.
+    if out.returncode != 0:
+        return ""
+    return out.stdout.decode("utf-8", "replace").strip()
 
 
 def _first_available(candidates):

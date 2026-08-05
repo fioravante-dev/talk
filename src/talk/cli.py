@@ -7,7 +7,7 @@ import json
 import sys
 import time
 
-from . import __version__, audio, config, daemon, output, polish, stt, wake
+from . import __version__, audio, config, daemon, output, polish, stt, voz, wake
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -26,6 +26,7 @@ exemplos:
   talk -f reuniao.m4a -m note   transcreve um arquivo e organiza como nota
   talk --silence-secs 1.5       volta a cortar sozinho no silêncio
   talk --wake-test              calibra a palavra-chave, mostrando os scores
+  talk --read                   lê em voz alta o texto que você selecionou
 """,
     )
     p.add_argument("--version", action="version", version=f"talk {__version__}")
@@ -86,6 +87,12 @@ exemplos:
     g.add_argument("--wake-test", action="store_true",
                    help="mostra os scores ao vivo, para calibrar o limiar")
 
+    g = p.add_argument_group("leitura em voz alta")
+    g.add_argument("--read", action="store_true",
+                   help="lê o texto selecionado; de novo, cala")
+    g.add_argument("--read-language", choices=["auto", "pt", "en"],
+                   help="voz a usar; auto escolhe pelo texto (padrão)")
+
     return p
 
 
@@ -93,7 +100,7 @@ def _merge(cfg: config.Config, args: argparse.Namespace) -> config.Config:
     for name in (
         "model", "device", "compute_type", "language", "vocab", "mode",
         "llm", "to", "paste_key", "input_device", "silence_secs", "max_secs",
-        "wake", "wake_model", "wake_threshold",
+        "wake", "wake_model", "wake_threshold", "read_language",
     ):
         value = getattr(args, name, None)
         if value is not None:
@@ -295,6 +302,17 @@ def main(argv: list[str] | None = None) -> int:
             except wake.WakeError as exc:
                 print(f"[talk] {exc}", file=sys.stderr)
                 return 1
+        # Só baixa as vozes se o extra estiver instalado: quem não usa leitura
+        # não precisa de 121 MB parados no disco.
+        if voz.disponivel():
+            print("leitura em voz alta · vozes", file=sys.stderr)
+            for nome in (cfg.voz_pt, cfg.voz_en):
+                try:
+                    print(f"  {voz.baixar(nome)}", file=sys.stderr)
+                except voz.VozError as exc:
+                    print(f"[talk] {exc}", file=sys.stderr)
+                    return 1
+
         if cfg.mode == "raw":
             print("modo raw: sem modelo de limpeza para baixar.", file=sys.stderr)
             return 0
@@ -333,7 +351,12 @@ def main(argv: list[str] | None = None) -> int:
         if state is None:
             print("daemon parado")
             return 1
-        linha = "gravando" if state.get("recording") else "daemon pronto"
+        if state.get("recording"):
+            linha = "gravando"
+        elif state.get("reading"):
+            linha = "lendo em voz alta"
+        else:
+            linha = "daemon pronto"
         if state.get("wake"):
             linha += f" · ouvindo '{state.get('wake_model', '')}'"
         print(linha)
@@ -350,6 +373,22 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.wake_test:
         return _wake_test(cfg)
+
+    if args.read:
+        # Sempre pelo daemon: ele é quem tem o estado da leitura em curso, e
+        # sem isso a segunda batida do atalho não teria o que calar.
+        daemon.ensure_running()
+        resp = daemon.request(
+            {"cmd": "read", "language": args.read_language or cfg.read_language},
+            timeout=15.0,
+        )
+        if resp is None:
+            print("[talk] daemon não respondeu", file=sys.stderr)
+            return 1
+        if resp.get("status") == "error":
+            print(f"[talk] {resp.get('error')}", file=sys.stderr)
+            return 1
+        return 0
 
     if args.serve:
         return daemon.serve(cfg)

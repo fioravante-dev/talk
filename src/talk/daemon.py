@@ -35,7 +35,14 @@ from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 
-from . import audio, config, output, polish, stt, wake
+from . import audio, config, output, polish, stt, voz, wake
+
+
+def _duracao(segundos: float) -> str:
+    """'~2 min' em vez de '~118 s': a unidade certa para decidir se vale ouvir."""
+    if segundos < 90:
+        return f"{segundos:.0f}s"
+    return f"{segundos / 60:.0f} min"
 
 
 def socket_path() -> Path:
@@ -103,6 +110,12 @@ class Daemon:
         self.wake_stop = threading.Event()  # pede ao ouvinte que solte o mic
         self.wake_on = threading.Event()  # o ouvinte está de fato escutando
         self.wake_thread: threading.Thread | None = None
+        # A leitura em voz alta NÃO usa self.lock: ela não é uma ditada e não
+        # pode segurar uma. O que ela faz é ceder — qualquer ditada que comece
+        # a interrompe, porque falar por cima da máquina nunca é a intenção.
+        self.lendo = threading.Event()
+        self.parar_leitura = threading.Event()
+        self._leitor = None  # carregado na primeira leitura, como o Whisper
         # Congelado na subida: é o código REALMENTE carregado neste processo.
         # Recalcular a cada ping leria os arquivos já editados no disco, e um
         # daemon obsoleto se declararia atual — que era o defeito original.
@@ -146,6 +159,10 @@ class Daemon:
         if self.recording.is_set():
             self.stop_recording.set()
             return {"status": "stopping"}
+
+        # Ditar por cima da máquina lendo não é o que ninguém quer — e o
+        # microfone captaria o próprio Piper.
+        self.calar()
 
         if not self.lock.acquire(blocking=False):
             return {"status": "busy"}
@@ -350,6 +367,19 @@ class Daemon:
 
                         if not det.disparou(bloco):
                             continue
+
+                        # Enquanto lê, o disparo significa CALAR, não ditar.
+                        # Duas razões: interromper por voz é o que importa num
+                        # recurso usado sem olhar para a tela; e o alto-falante
+                        # alimenta o microfone, então o próprio Piper pode
+                        # disparar o detector. Com esta regra essa falha se
+                        # autolimita — ao calar, a fonte do disparo some.
+                        if self.lendo.is_set():
+                            self.parar_leitura.set()
+                            det.reset()
+                            fonte.drain()
+                            continue
+
                         self._ditar_por_voz(fonte)
                         det.reset()
                         fonte.drain()
@@ -403,6 +433,74 @@ class Daemon:
             self.last_used = time.monotonic()
             self.lock.release()
 
+    # -- leitura em voz alta ----------------------------------------------
+
+    def calar(self) -> None:
+        """Interrompe a leitura em curso, se houver. Barato e idempotente."""
+        if self.lendo.is_set():
+            self.parar_leitura.set()
+
+    def ler(self, req: dict) -> dict:
+        """Lê em voz alta o que estiver selecionado.
+
+        Segunda batida no atalho enquanto lê: cala. É o mesmo liga/desliga da
+        ditada, e o único jeito de descobrir que era o texto errado é ouvir os
+        primeiros segundos — então a saída precisa estar a um toque.
+        """
+        if self.lendo.is_set():
+            self.parar_leitura.set()
+            return {"status": "stopping"}
+
+        try:
+            texto = output.selecao()
+        except output.OutputError as exc:
+            notify("⚠ Não deu para ler a seleção", str(exc))
+            return {"status": "error", "error": str(exc)}
+
+        if not texto:
+            # Silêncio aqui faz o atalho parecer quebrado. Ele não está: não há
+            # nada destacado.
+            notify("⃠ Nada selecionado", "destaque um texto e acione de novo")
+            return {"status": "empty"}
+
+        cfg = self.cfg
+        lang = req.get("language") or cfg.read_language
+        if lang in ("auto", "", None):
+            lang = voz.idioma(texto, padrao=(cfg.language or "pt"))
+        nome = cfg.voz_en if lang == "en" else cfg.voz_pt
+
+        try:
+            if self._leitor is None or self._leitor.voz != nome:
+                self._leitor = voz.Leitor(nome, velocidade=cfg.voz_velocidade)
+        except voz.VozError as exc:
+            notify("⚠ Leitura indisponível", str(exc))
+            return {"status": "error", "error": str(exc)}
+
+        segundos = voz.duracao_estimada(texto)
+        previa = texto[:60].replace("\n", " ") + ("…" if len(texto) > 60 else "")
+        notify(f"🔊 Lendo · {lang.upper()} · ~{_duracao(segundos)}", previa, tag="talk-read")
+
+        self.parar_leitura.clear()
+        self.lendo.set()
+        threading.Thread(
+            target=self._ler_ate_o_fim, args=(texto,), daemon=True
+        ).start()
+        return {"status": "ok", "seconds": round(segundos, 1), "language": lang}
+
+    def _ler_ate_o_fim(self, texto: str) -> None:
+        try:
+            completo = self._leitor.falar(texto, parar=self.parar_leitura)
+            if not completo:
+                notify("⏹ Leitura interrompida", tag="talk-read")
+        except Exception as exc:
+            # Sem o _respond aqui: uma exceção solta deixaria `lendo` preso e o
+            # atalho pareceria morto até o daemon reiniciar.
+            notify("⚠ Erro na leitura", repr(exc))
+            print(f"[talk] leitura falhou: {exc!r}", file=sys.stderr)
+        finally:
+            self.lendo.clear()
+            self.parar_leitura.clear()
+
     def alternar_escuta(self, req: dict) -> dict:
         """Liga e desliga o ouvinte sem reiniciar o daemon.
 
@@ -427,12 +525,18 @@ class Daemon:
         if cmd == "ping":
             return {"status": "ok", "recording": self.recording.is_set(),
                     "code": self.code, "wake": self.wake_on.is_set(),
-                    "wake_model": self.cfg.wake_model if self.cfg.wake else ""}
+                    "wake_model": self.cfg.wake_model if self.cfg.wake else "",
+                    "reading": self.lendo.is_set()}
         if cmd == "stop":
+            # Um só comando para as duas coisas: no momento em que você quer
+            # parar algo, não é hora de lembrar qual comando era.
             self.stop_recording.set()
+            self.calar()
             return {"status": "ok"}
         if cmd == "dictate":
             return self.dictate(req)
+        if cmd == "read":
+            return self.ler(req)
         if cmd == "wake":
             return self.alternar_escuta(req)
         if cmd == "quit":
