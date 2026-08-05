@@ -5,6 +5,7 @@ from __future__ import annotations
 import gc
 import re
 import sys
+import threading
 import zlib
 import time
 from dataclasses import dataclass
@@ -56,6 +57,22 @@ def _load(model: str, device: str, compute_type: str):
     return WhisperModel(model, device=device, compute_type=compute_type)
 
 
+_carregando = threading.Lock()
+
+
+def obter(model: str, device: str, compute_type: str):
+    """Carrega o modelo, garantindo que só uma thread o faça por vez.
+
+    O lru_cache não é atômico: duas threads em falta simultânea entram as duas
+    no construtor, carregam o modelo duas vezes e uma das cópias é jogada fora —
+    ~2,4 GB de pico numa placa que só tem espaço para 1,2. Isso passou a ser
+    alcançável quando a ditada por voz começou a aquecer o Whisper em paralelo à
+    gravação: fala curta e modelo frio põem as duas threads na mesma janela.
+    """
+    with _carregando:
+        return _load(model, device, compute_type)
+
+
 def is_loaded() -> bool:
     return _load.cache_info().currsize > 0
 
@@ -95,11 +112,11 @@ def transcribe(
         audio = np.nan_to_num(audio, nan=0.0, posinf=0.0, neginf=0.0)
 
     try:
-        whisper = _load(model, device, compute_type)
+        whisper = obter(model, device, compute_type)
     except Exception as exc:  # GPU indisponível / libs CUDA faltando
         if device != "cpu":
             print(f"[stt] GPU indisponível ({exc}); caindo para CPU.", file=sys.stderr)
-            whisper = _load(model, "cpu", "int8")
+            whisper = obter(model, "cpu", "int8")
         else:
             raise
 
@@ -136,7 +153,7 @@ def transcribe(
             "[stt] sem VRAM disponível; refazendo na CPU (mais lento).",
             file=sys.stderr,
         )
-        text, info = run(_load(model, "cpu", "int8"))
+        text, info = run(obter(model, "cpu", "int8"))
 
     return Transcript(
         text=text,
@@ -168,7 +185,7 @@ def warmup(model: str, device: str, compute_type: str) -> bool:
     para falhar; o modelo entra na primeira ditada.
     """
     try:
-        whisper = _load(model, device, compute_type)
+        whisper = obter(model, device, compute_type)
         list(whisper.transcribe(np.zeros(16_000, dtype=np.float32), language="pt")[0])
         return True
     except RuntimeError as exc:
