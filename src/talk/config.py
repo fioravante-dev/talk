@@ -66,9 +66,15 @@ class Config:
     # leitura em voz alta — o caminho inverso do resto do projeto.
     # Lê o que você SELECIONOU, não a tela. O Piper roda na CPU, então isto não
     # disputa VRAM com o Whisper nem com o LLM.
-    voz_pt: str = "pt_BR-faber-medium"
-    voz_en: str = "en_US-lessac-medium"
+    # kokoro soa mais natural; piper é o leve (61 MB por voz contra 347 MB, e
+    # ~25x o tempo real contra ~4,5x) para máquina fraca.
+    voz_motor: str = "kokoro"
+    # Vazio usa a voz padrão do motor para o idioma — assim trocar de motor não
+    # obriga a trocar os nomes, que não têm nada em comum entre os catálogos.
+    voz_pt: str = ""
+    voz_en: str = ""
     voz_velocidade: float = 1.0  # 1.5 fala mais rápido; 0.8 mais devagar
+    voz_cadencia: float = 1.2  # só piper: variação de duração dos fonemas
     read_language: str = "auto"  # auto detecta pelo texto; ou "pt"/"en" fixo
 
     # saída
@@ -194,9 +200,11 @@ wake_skip_secs = 0.0       # suba para 0.2 se "Jarvis" vazar na transcrição
 # --- leitura em voz alta ---------------------------------------------------
 # Lê o texto que você SELECIONOU (destacado com o mouse), não a tela. Exige
 # `uv sync --extra voz` e `talk --download`. O Piper roda na CPU: nada de VRAM.
-voz_pt = "pt_BR-faber-medium"   # ou cadu, edresson, jeff
-voz_en = "en_US-lessac-medium"
+voz_motor = "kokoro"       # kokoro (mais natural, 347 MB) ou piper (leve, 61 MB)
+voz_pt = ""                # vazio = a voz padrão do motor. kokoro: pm_alex,
+voz_en = ""                # pf_dora · piper: pt_BR-faber-medium, cadu, jeff
 voz_velocidade = 1.0       # 1.5 fala mais rápido; 0.8 mais devagar
+voz_cadencia = 1.2         # só piper: acima de ~1.5 dá tremido nas vogais
 read_language = "auto"     # auto escolhe a voz pelo texto; ou "pt"/"en" fixo
 
 to = "auto"                # auto, stdout, clipboard, paste, type

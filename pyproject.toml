@@ -35,10 +35,16 @@ wake = [
     # onnxruntime e tqdm já entram como transitivos do faster-whisper
 ]
 
-# Leitura em voz alta. Também opcional: são ~126 MB de vozes e um motor de
-# síntese que só serve a quem usa o recurso. O Piper roda na CPU e não disputa
-# VRAM com o Whisper nem com o LLM.
-voz = ["piper-tts>=1.4.2"]
+# Leitura em voz alta. Opcional: são centenas de MB de modelo que só servem a
+# quem usa o recurso. Os dois motores rodam na CPU e não disputam VRAM com o
+# Whisper nem com o LLM.
+#
+# kokoro é o padrão — venceu um teste cego pareado contra o Piper. voz-leve
+# instala o Piper, que soa mais sintético mas ocupa 61 MB por voz em vez de
+# 347 MB e sintetiza ~25x o tempo real em vez de ~4,5x: é a escolha certa em
+# máquina fraca, e um bom ponto de partida para reaproveitar em outro projeto.
+voz = ["kokoro-onnx>=0.5.0"]
+voz-leve = ["piper-tts>=1.4.2"]
 
 [project.scripts]
 talk = "talk.cli:main"

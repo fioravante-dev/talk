@@ -304,14 +304,19 @@ def main(argv: list[str] | None = None) -> int:
                 return 1
         # Só baixa as vozes se o extra estiver instalado: quem não usa leitura
         # não precisa de 121 MB parados no disco.
-        if voz.disponivel():
-            print("leitura em voz alta · vozes", file=sys.stderr)
-            for nome in (cfg.voz_pt, cfg.voz_en):
-                try:
-                    print(f"  {voz.baixar(nome)}", file=sys.stderr)
-                except voz.VozError as exc:
-                    print(f"[talk] {exc}", file=sys.stderr)
-                    return 1
+        if voz.disponivel(cfg.voz_motor):
+            print(f"leitura em voz alta · {cfg.voz_motor}", file=sys.stderr)
+            try:
+                if cfg.voz_motor == "kokoro":
+                    # Um modelo só serve as 54 vozes; não há o que escolher aqui.
+                    print(f"  {voz.baixar('kokoro')}", file=sys.stderr)
+                else:
+                    for lang, escolhida in (("pt", cfg.voz_pt), ("en", cfg.voz_en)):
+                        nome = voz.voz_para("piper", lang, escolhida)
+                        print(f"  {voz.baixar('piper', nome)}", file=sys.stderr)
+            except voz.VozError as exc:
+                print(f"[talk] {exc}", file=sys.stderr)
+                return 1
 
         if cfg.mode == "raw":
             print("modo raw: sem modelo de limpeza para baixar.", file=sys.stderr)

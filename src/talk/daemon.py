@@ -467,16 +467,22 @@ class Daemon:
         lang = req.get("language") or cfg.read_language
         if lang in ("auto", "", None):
             lang = voz.idioma(texto, padrao=(cfg.language or "pt"))
-        nome = cfg.voz_en if lang == "en" else cfg.voz_pt
+        motor = cfg.voz_motor
+        nome = voz.voz_para(motor, lang, cfg.voz_en if lang == "en" else cfg.voz_pt)
 
         try:
-            if self._leitor is None or self._leitor.voz != nome:
-                self._leitor = voz.Leitor(nome, velocidade=cfg.voz_velocidade)
+            # O modelo fica carregado entre leituras, como o Whisper: recarregar
+            # o Kokoro a cada acionamento custaria mais que a própria fala curta.
+            if self._leitor is None or self._leitor.chave != (motor, nome, lang):
+                self._leitor = voz.Leitor(
+                    motor, nome, lang=lang,
+                    velocidade=cfg.voz_velocidade, cadencia=cfg.voz_cadencia,
+                )
         except voz.VozError as exc:
             notify("⚠ Leitura indisponível", str(exc))
             return {"status": "error", "error": str(exc)}
 
-        segundos = voz.duracao_estimada(texto)
+        segundos = voz.duracao_estimada(texto, motor)
         previa = texto[:60].replace("\n", " ") + ("…" if len(texto) > 60 else "")
         notify(f"🔊 Lendo · {lang.upper()} · ~{_duracao(segundos)}", previa, tag="talk-read")
 

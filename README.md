@@ -21,7 +21,7 @@ palavra-chave ↗
 | detecção de voz | Silero VAD v6 | 1,2 MB, na CPU |
 | limpeza do texto | `qwen3:4b-instruct` via Ollama | ~3,1 GB |
 | palavra-chave (opcional) | `hey_jarvis` via openWakeWord | ~3,7 MB, na CPU |
-| leitura em voz alta (opcional) | Piper `faber` (pt) e `lessac` (en) | ~121 MB, na CPU |
+| leitura em voz alta (opcional) | Kokoro-82M (ou Piper, o leve) | ~347 MB, na CPU |
 
 Os dois são baixados por `talk --download`, ou sozinhos na primeira ditada se
 você pular esse passo. Em repouso nada fica na VRAM: carregam quando você dita e
@@ -209,6 +209,7 @@ Os principais:
 | `wake` | `false` | ouvinte de palavra-chave (veja a seção abaixo) |
 | `wake_threshold` | `0.5` | limiar de disparo; calibre com `--wake-test` |
 | `wake_silence_secs` | `2.0` | silêncio que encerra a ditada aberta por voz |
+| `voz_motor` | `kokoro` | motor de síntese; `piper` é o leve |
 | `voz_velocidade` | `1.0` | velocidade da leitura em voz alta |
 | `read_language` | `auto` | voz da leitura; `auto` escolhe pelo texto |
 
@@ -371,7 +372,7 @@ você ter como perceber.
 
 ```bash
 uv sync --extra voz     # no diretório do projeto
-talk --download         # baixa as duas vozes (~121 MB)
+talk --download         # baixa o modelo (~337 MB)
 ```
 
 Registre um atalho, do mesmo jeito que os de ditado:
@@ -404,12 +405,53 @@ português e inglês. Para fixar, `read_language = "pt"` no config.
   alto-falante alimentar o microfone: se o próprio texto lido disparar o
   detector, a consequência é ele se calar — o que remove a causa.
 
+### Dois motores
+
+O padrão é o **Kokoro**, que venceu um teste cego pareado contra o Piper — a
+mesma frase longa, tocada alternada, sem o ouvinte saber qual era qual. Mas o
+**Piper** segue suportado, e não por nostalgia: em máquina fraca, em container,
+ou num projeto onde 347 MB não cabem, ele é a escolha certa.
+
+| | `kokoro` (padrão) | `piper` (leve) |
+|---|---|---|
+| disco | 347 MB, um modelo serve 54 vozes | **61 MB por voz** |
+| síntese | ~4,5x o tempo real | **~25x o tempo real** |
+| primeira amostra | ~700 ms (só a 1ª leitura) | **233 ms** |
+| taxa | 24 kHz | 22,05 kHz |
+| naturalidade | **melhor** | mais sintético |
+| licença | Apache 2.0 | MIT |
+| vozes pt-BR | `pm_alex`, `pf_dora` | `faber`, `cadu`, `jeff` |
+
+Para trocar:
+
+```bash
+uv sync --extra voz-leve
+```
+
+```toml
+voz_motor = "piper"
+voz_cadencia = 1.2       # variação de duração dos fonemas; >1.5 dá tremido
+```
+
+Os dois rodam em ONNX na **CPU** e não disputam VRAM com o Whisper nem com o
+LLM. `voz_pt` e `voz_en` vazios usam a voz padrão do motor — trocar de motor
+não obriga a trocar os nomes, que não têm nada em comum entre os dois catálogos.
+
+Duas armadilhas que custaram tempo, registradas para quem for reaproveitar:
+
+- **`pt_BR-edresson` está quebrado para português.** Só existe em qualidade
+  "low", e o mapa de fonemas dele não tem o til (`̃`) — o som de "não",
+  "coração", "mãe".
+- **A taxa de amostragem vem do motor.** 24 kHz no Kokoro, 22,05 kHz no Piper.
+  Errar isso não dá erro: só deixa a voz mais grave ou mais aguda.
+
 ### O que custa
 
-- **~121 MB** das duas vozes, em `~/.cache/talk/voices/`.
-- **Zero VRAM.** O Piper roda na CPU; o Whisper e o LLM seguem donos da GPU.
-- Medido nesta máquina: 233 ms até a primeira amostra, e a síntese roda a ~25x
-  o tempo real — a reprodução é sempre o gargalo, nunca o modelo.
+- **347 MB** do Kokoro em `~/.cache/talk/voices/kokoro/` (ou 61 MB por voz do
+  Piper, em `~/.cache/talk/voices/`).
+- **Zero VRAM.** Os dois rodam na CPU; o Whisper e o LLM seguem donos da GPU.
+- A síntese nunca é o gargalo — a reprodução é. Por isso ela é frase a frase e
+  vai direto para o player, em vez de esperar o texto inteiro.
 - O texto passa por uma limpeza determinística antes: URL vira "link", markdown
   perde os marcadores, bloco de código é pulado. Regras fixas, não um LLM —
   ele poderia reescrever, e o ponto é ler o que está lá.
@@ -447,7 +489,7 @@ src/talk/
   daemon.py   socket unix, ciclo de vida do modelo, notificações
   audio.py    captura via pw-record, fluxo compartilhado, gravação em disco
   wake.py     ouvinte de palavra-chave, openWakeWord em ONNX (opcional)
-  voz.py      leitura em voz alta com Piper, síntese frase a frase (opcional)
+  voz.py      leitura em voz alta, Kokoro ou Piper, síntese frase a frase
   stt.py      faster-whisper, fallback para CPU, filtro de alucinação
   polish.py   prompts do LLM, anti-injeção, fixação de idioma
   output.py   stdout / clipboard / paste / type, com fallbacks
