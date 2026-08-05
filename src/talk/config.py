@@ -41,6 +41,28 @@ class Config:
     silence_threshold: float = 0.015
     max_secs: float = 300.0
 
+    # palavra-chave (wake word) — desligada por padrão.
+    # Ela SOMA ao atalho de teclado, não o substitui: os dois gatilhos caem no
+    # mesmo daemon e no mesmo processamento.
+    wake: bool = False
+    wake_model: str = "hey_jarvis"
+    wake_threshold: float = 0.5
+    wake_patience: int = 2  # quadros de 80 ms seguidos acima do limiar
+    wake_cooldown: float = 3.0  # tempo mudo do detector depois de disparar
+    # A ditada aberta por voz não tem tecla para encerrar, então ela para
+    # sozinha no silêncio. Estes campos são separados dos de cima de propósito:
+    # o caminho do atalho continua em silence_secs = 0, sem corte automático.
+    wake_silence_secs: float = 2.0
+    wake_max_secs: float = 60.0
+    # Fala somada que precisa entrar antes de o corte por silêncio poder agir.
+    # Existe porque o rabo da palavra-chave, sozinho, não pode contar como fala:
+    # senão a pausa de quem espera o "pode falar" encerra a ditada antes da
+    # primeira palavra.
+    wake_min_speech_secs: float = 0.5
+    # Sem essa fala mínima dentro deste prazo, foi ruído: desiste calado.
+    wake_grace_secs: float = 5.0
+    wake_skip_secs: float = 0.0  # suba se o rabo da palavra vazar na transcrição
+
     # saída
     to: str = "auto"
     # Combinação de colar. Terminais costumam usar ctrl+shift+v.
@@ -84,6 +106,15 @@ def parse_duration(value: str | float) -> float:
     return float(match.group(1)) * _UNIT[match.group(2)]
 
 
+def _bool(texto: str) -> bool:
+    """Coerção de bool vinda do ambiente.
+
+    Sem isto `TALK_WAKE=0` chegaria como a string "0", que é verdadeira em
+    Python — a variável ligaria justamente o que ela pede para desligar.
+    """
+    return texto.strip().lower() not in ("", "0", "false", "no", "off", "nao", "não")
+
+
 def load() -> Config:
     cfg = Config()
 
@@ -100,6 +131,8 @@ def load() -> Config:
             continue
         if f.type in ("float", "float | None"):
             setattr(cfg, f.name, float(env))
+        elif f.type == "bool":
+            setattr(cfg, f.name, _bool(env))
         elif f.type in ("int", "int | None"):
             setattr(cfg, f.name, int(env))
         else:
@@ -126,6 +159,29 @@ whisper_keep_alive = "5m"  # ocioso por esse tempo, o Whisper sai da VRAM
 # Ponha 1.5, por exemplo, para voltar a cortar sozinho após 1,5 s de silêncio.
 silence_secs = 0.0
 silence_threshold = 0.015
+
+# --- palavra-chave ---------------------------------------------------------
+# Um segundo gatilho, que SOMA ao atalho de teclado em vez de substituí-lo.
+# Com wake = true o daemon fica com o microfone aberto o tempo todo, ouvindo só
+# pela palavra-chave (~3 % de um núcleo). Exige `uv sync --extra wake` no
+# diretório do projeto e depois `talk --download`.
+# Calibre o limiar com `talk --wake-test`.
+wake = false
+wake_model = "hey_jarvis"  # hey_jarvis, alexa, hey_mycroft, hey_rhasspy,
+                           # ou o caminho de um .onnx que você treinou
+wake_threshold = 0.5       # maior = menos falso positivo, mais falso negativo
+wake_patience = 2          # quadros de 80 ms seguidos acima do limiar
+wake_cooldown = 3.0        # tempo mudo do detector depois de disparar
+
+# A ditada aberta por voz não tem tecla para encerrar: ela para sozinha no
+# silêncio. Estes valores valem SÓ para o caminho da voz — o atalho segue
+# governado por silence_secs, logo acima.
+wake_silence_secs = 2.0
+wake_max_secs = 60.0
+wake_min_speech_secs = 0.5 # fala somada antes de o corte por silêncio valer —
+                           # o rabo da palavra-chave sozinho não conta como fala
+wake_grace_secs = 5.0      # sem essa fala mínima nesse prazo: era ruído
+wake_skip_secs = 0.0       # suba para 0.2 se "Jarvis" vazar na transcrição
 
 to = "auto"                # auto, stdout, clipboard, paste, type
 paste_key = "ctrl+v"       # ctrl+shift+v se o alvo for um terminal

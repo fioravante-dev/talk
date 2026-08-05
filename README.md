@@ -3,11 +3,14 @@
 Ditado por voz 100% local para Linux. Grava do microfone, transcreve com Whisper
 na GPU e passa o texto por um LLM que corrige pontuação e remove muletas de fala.
 Aperta um atalho, fala, aperta de novo — o texto aparece onde o cursor estiver.
+Opcionalmente, uma palavra-chave abre a ditada sem tocar no teclado.
 
 Nada sai da máquina. Sem API key, sem nuvem, sem assinatura.
 
 ```
-microfone → pw-record → faster-whisper (GPU) → LLM via Ollama → cola no cursor
+      atalho ↘
+                microfone → pw-record → faster-whisper (GPU) → LLM via Ollama → cola no cursor
+palavra-chave ↗
 ```
 
 ## Os modelos
@@ -17,6 +20,7 @@ microfone → pw-record → faster-whisper (GPU) → LLM via Ollama → cola no 
 | transcrição | Whisper `large-v3-turbo` via faster-whisper | ~1,2 GB |
 | detecção de voz | Silero VAD v6 | 1,2 MB, na CPU |
 | limpeza do texto | `qwen3:4b-instruct` via Ollama | ~3,1 GB |
+| palavra-chave (opcional) | `hey_jarvis` via openWakeWord | ~3,7 MB, na CPU |
 
 Os dois são baixados por `talk --download`, ou sozinhos na primeira ditada se
 você pular esse passo. Em repouso nada fica na VRAM: carregam quando você dita e
@@ -133,6 +137,9 @@ de lugar.
 estiver. As notificações mostram o estado: abrindo microfone → pode falar →
 transcrevendo → pronto.
 
+**Pela voz:** diga a palavra-chave e emende a frase; ela para sozinha quando você
+cala. Desligada por padrão — veja [Palavra-chave](#palavra-chave-hey-jarvis).
+
 **Pelo terminal:**
 
 ```bash
@@ -198,6 +205,9 @@ Os principais:
 | `whisper_keep_alive` | `5m` | ocioso por esse tempo, o Whisper sai da VRAM |
 | `keep_alive` | `5m` | o mesmo para o LLM, via Ollama |
 | `vocab` | vazio | termos que o Whisper costuma errar |
+| `wake` | `false` | ouvinte de palavra-chave (veja a seção abaixo) |
+| `wake_threshold` | `0.5` | limiar de disparo; calibre com `--wake-test` |
+| `wake_silence_secs` | `2.0` | silêncio que encerra a ditada aberta por voz |
 
 `whisper_keep_alive` aceita `30s`, `5m`, `1h`, `0` (libera após cada ditada) ou
 `never` (mantém sempre). Com o padrão de 5 minutos, ditadas em sequência são
@@ -229,6 +239,121 @@ O log dele fica em `~/.cache/talk/daemon.log`.
 
 ---
 
+## Palavra-chave (`hey jarvis`)
+
+Um **segundo gatilho**, que soma ao atalho em vez de substituí-lo. Às vezes a mão
+já está no teclado e a tecla é mais rápida; às vezes ela está ocupada, e a voz é
+a única entrada que sobra. Os dois convivem, e vem desligada por padrão.
+
+### Ligar
+
+```bash
+uv sync --extra wake                 # no diretório do projeto
+```
+
+Depois, em `~/.config/talk/config.toml`:
+
+```toml
+wake = true
+```
+
+E baixe o modelo:
+
+```bash
+talk --download
+talk --quit                          # o daemon precisa subir de novo para ouvir
+```
+
+> Um `uv sync` sem `--extra wake` **remove** esses pacotes. Use sempre o extra
+> depois de ligar a palavra-chave.
+
+### Como ela para
+
+Esta é a diferença que importa em relação ao atalho: não há tecla para apertar de
+novo. A ditada aberta por voz **para sozinha** após `wake_silence_secs` (2 s) de
+silêncio, ou no teto de `wake_max_secs` (60 s). O `talk --stop` e o atalho de
+teclado também a encerram, se você quiser cortar antes.
+
+O corte por silêncio só arma depois de `wake_min_speech_secs` (0,5 s) de fala
+somada. Isso não é um detalhe: o rabo da própria palavra-chave sobra na fila
+quando o detector dispara, e sem esse acumulado ele contaria como fala — a pausa
+natural de quem espera o "pode falar" estouraria os 2 s de silêncio antes da
+primeira palavra, e a ditada sairia vazia.
+
+E se ela disparar por engano — um ruído que soou como a palavra-chave — e essa
+fala mínima não vier em `wake_grace_secs` (5 s), ela desiste calada: nenhuma
+notificação, nenhum arquivo, e o Whisper nem chega a ser acordado. O motivo fica
+registrado em `~/.cache/talk/daemon.log`, para um descarte indevido não se
+parecer com "não escutou".
+
+### Calibrar
+
+```bash
+talk --wake-test
+```
+
+Mostra o score ao vivo, de 0 a 1. Fale a palavra-chave umas dez vezes e anote o
+pico; depois converse, tussa, digite, e anote o teto do ruído. O limiar
+(`wake_threshold`, padrão 0.5) mora entre os dois — mais perto do ruído se você
+prefere repetir, mais perto do pico se prefere não ser interrompido no meio de
+uma conversa. Com um daemon de pé, o teste o cala enquanto roda e o devolve como
+estava ao sair.
+
+### Ouvir desde o login
+
+O ouvinte só existe enquanto o daemon existe, e o daemon nasce na primeira
+ditada. Para tê-lo escutando desde o login, crie
+`~/.config/autostart/talk.desktop`:
+
+```ini
+[Desktop Entry]
+Type=Application
+Name=talk (ouvinte de palavra-chave)
+Exec=/CAMINHO/PARA/talk/.venv/bin/talk --serve
+X-GNOME-Autostart-enabled=true
+```
+
+### O que custa
+
+Vale saber antes de ligar, não depois:
+
+- **O microfone fica aberto o tempo todo.** Em muitos desktops o indicador de
+  captura e o LED do microfone ficam permanentemente acesos, e o `talk` aparece
+  para sempre na lista de aplicativos usando o áudio.
+- **~6 % de um núcleo**, contínuo (medido numa RTX 3060 Laptop; o modelo em si
+  leva 2,4 ms por quadro de 80 ms, o resto é a captura e o laço).
+- **+~55 MB de dependências** — o openWakeWord importa scipy e scikit-learn no
+  topo do módulo, para um treinador de verificadores que este projeto não usa. É
+  por isso que ela é um extra opcional.
+- **Zero VRAM em repouso**: o Whisper continua só entrando quando você dita.
+- O áudio continua sem sair da máquina. A detecção é local, como o resto.
+
+### Só em inglês, por enquanto
+
+Os modelos prontos são `hey_jarvis`, `alexa`, `hey_mycroft` e `hey_rhasspy` — a
+palavra-chave é em inglês, a ditada continua em português. `hey_jarvis` é o mais
+robusto dos quatro contra falso positivo.
+
+Para uma em português, o openWakeWord tem um notebook que gera as amostras com
+TTS sintético e sai com um `.onnx` em menos de uma hora numa GPU. O campo aceita
+caminho, então não há código a mudar:
+
+```toml
+wake_model = "~/.cache/talk/wake/ei_computador.onnx"
+```
+
+Boas candidatas em pt-BR têm três ou quatro sílabas e não são palavras comuns —
+"ei computador", "escuta talk". Uma palavra que aparece em conversa normal vira
+ditada fantasma.
+
+### Licença dos modelos
+
+O código do openWakeWord é Apache-2.0, mas os **modelos pré-treinados são
+CC-BY-NC-SA 4.0** — uso não comercial. É por isso que eles são baixados para
+`~/.cache/talk/wake/` em vez de virem no repositório, que é MIT.
+
+---
+
 ## A fala nunca se perde
 
 O áudio vai para o disco **enquanto** é capturado, antes de qualquer modelo ser
@@ -251,7 +376,8 @@ talk --last -m raw  # ... sem passar pelo LLM
 src/talk/
   cli.py      argumentos, orquestração, cliente do daemon
   daemon.py   socket unix, ciclo de vida do modelo, notificações
-  audio.py    captura via pw-record, gravação em disco
+  audio.py    captura via pw-record, fluxo compartilhado, gravação em disco
+  wake.py     ouvinte de palavra-chave, openWakeWord em ONNX (opcional)
   stt.py      faster-whisper, fallback para CPU, filtro de alucinação
   polish.py   prompts do LLM, anti-injeção, fixação de idioma
   output.py   stdout / clipboard / paste / type, com fallbacks

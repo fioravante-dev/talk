@@ -7,7 +7,7 @@ import json
 import sys
 import time
 
-from . import __version__, audio, config, daemon, output, polish, stt
+from . import __version__, audio, config, daemon, output, polish, stt, wake
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -25,6 +25,7 @@ exemplos:
   talk --loop --to type         ditado contínuo direto no app focado
   talk -f reuniao.m4a -m note   transcreve um arquivo e organiza como nota
   talk --silence-secs 1.5       volta a cortar sozinho no silêncio
+  talk --wake-test              calibra a palavra-chave, mostrando os scores
 """,
     )
     p.add_argument("--version", action="version", version=f"talk {__version__}")
@@ -75,6 +76,16 @@ exemplos:
     g.add_argument("--status", action="store_true", help="diz se o daemon está de pé")
     g.add_argument("--quit", action="store_true", help="desliga o daemon")
 
+    g = p.add_argument_group("palavra-chave (um segundo gatilho, além do atalho)")
+    # default=None é obrigatório: _merge só sobrescreve o que não é None, e um
+    # store_true comum entregaria False sempre, apagando o wake = true do TOML.
+    g.add_argument("--wake", action=argparse.BooleanOptionalAction, default=None,
+                   help="liga o ouvinte de palavra-chave no daemon")
+    g.add_argument("--wake-model", help="hey_jarvis, alexa, hey_mycroft… ou um .onnx")
+    g.add_argument("--wake-threshold", type=float, help="limiar de disparo (0 a 1)")
+    g.add_argument("--wake-test", action="store_true",
+                   help="mostra os scores ao vivo, para calibrar o limiar")
+
     return p
 
 
@@ -82,6 +93,7 @@ def _merge(cfg: config.Config, args: argparse.Namespace) -> config.Config:
     for name in (
         "model", "device", "compute_type", "language", "vocab", "mode",
         "llm", "to", "paste_key", "input_device", "silence_secs", "max_secs",
+        "wake", "wake_model", "wake_threshold",
     ):
         value = getattr(args, name, None)
         if value is not None:
@@ -168,6 +180,58 @@ def _run_once(cfg: config.Config, args: argparse.Namespace) -> int:
     return 0
 
 
+def _wake_test(cfg: config.Config) -> int:
+    """Mostra o score da palavra-chave ao vivo. É assim que se acha o limiar.
+
+    Fale a palavra-chave umas dez vezes e anote o pico; depois converse, tussa,
+    digite, e anote o teto do ruído. O limiar mora entre os dois — mais perto do
+    ruído se você prefere repetir, mais perto do pico se prefere não ser
+    interrompido no meio de uma conversa.
+    """
+    try:
+        det = wake.Detector(
+            modelo=cfg.wake_model, threshold=cfg.wake_threshold,
+            patience=cfg.wake_patience, cooldown=cfg.wake_cooldown,
+        )
+    except wake.WakeError as exc:
+        print(f"[talk] {exc}", file=sys.stderr)
+        return 1
+
+    # Um daemon ouvindo em paralelo abriria uma ditada de verdade a cada acerto
+    # do teste. Cala a boca dele enquanto isso, e devolve como estava no fim.
+    pausa = daemon.request({"cmd": "wake", "enable": False}, timeout=2.0)
+    print(f"ouvindo '{det.nome}' · limiar {cfg.wake_threshold} · Ctrl-C encerra",
+          file=sys.stderr)
+    pico = 0.0
+    try:
+        with audio.stream(cfg.input_device) as fonte:
+            while True:
+                bloco = fonte.get(timeout=0.5)
+                if bloco is None:
+                    if not fonte.vivo:
+                        break
+                    continue
+                disparo = det.disparou(bloco)
+                pico = max(pico, det.ultimo)
+                cheio = min(30, int(det.ultimo * 30))
+                barra = "█" * cheio + "·" * (30 - cheio)
+                cor = "32" if disparo else ("33" if det.ultimo >= cfg.wake_threshold else "2")
+                sys.stderr.write(
+                    f"\r  \033[{cor}m{barra}\033[0m {det.ultimo:5.3f}"
+                    f"{'  ← DISPAROU' if disparo else ''}\033[K"
+                )
+                if disparo:
+                    sys.stderr.write("\n")
+                sys.stderr.flush()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        sys.stderr.write(f"\r\033[K  pico observado: {pico:.3f}\n")
+        if pausa is not None and pausa.get("wake_antes"):
+            daemon.request({"cmd": "wake", "enable": True}, timeout=2.0)
+    return 0
+
+
 def _run_via_daemon(cfg: config.Config, args: argparse.Namespace) -> int:
     """Delega a ditada ao daemon; o stdout continua sendo do cliente."""
     targets = [t for t in cfg.targets if t != "stdout"]
@@ -222,6 +286,15 @@ def main(argv: list[str] | None = None) -> int:
         cfg = _merge(config.load(), args)
         print(f"transcrição · {cfg.model}", file=sys.stderr)
         stt.download(cfg.model)
+        # Antes do desvio do modo raw: a palavra-chave é ortogonal ao LLM, e
+        # quem dita em raw ainda pode querer abrir a ditada por voz.
+        if cfg.wake:
+            print(f"palavra-chave · {cfg.wake_model}", file=sys.stderr)
+            try:
+                print(f"  {wake.baixar(cfg.wake_model)}", file=sys.stderr)
+            except wake.WakeError as exc:
+                print(f"[talk] {exc}", file=sys.stderr)
+                return 1
         if cfg.mode == "raw":
             print("modo raw: sem modelo de limpeza para baixar.", file=sys.stderr)
             return 0
@@ -260,7 +333,10 @@ def main(argv: list[str] | None = None) -> int:
         if state is None:
             print("daemon parado")
             return 1
-        print("gravando" if state.get("recording") else "daemon pronto")
+        linha = "gravando" if state.get("recording") else "daemon pronto"
+        if state.get("wake"):
+            linha += f" · ouvindo '{state.get('wake_model', '')}'"
+        print(linha)
         return 0
 
     if args.stop or args.quit:
@@ -271,6 +347,9 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     cfg = _merge(config.load(), args)
+
+    if args.wake_test:
+        return _wake_test(cfg)
 
     if args.serve:
         return daemon.serve(cfg)

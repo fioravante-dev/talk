@@ -8,6 +8,7 @@ primeiro evita uma dependência de sistema, então é o padrão quando existe.
 from __future__ import annotations
 
 import _thread
+import contextlib
 import math
 import os
 import queue
@@ -24,8 +25,15 @@ from pathlib import Path
 import numpy as np
 
 SAMPLE_RATE = 16_000  # o que o Whisper espera
-BLOCK = 1600  # 100 ms
+BLOCK = 1280  # 80 ms — o quadro que o openWakeWord espera
 _BYTES_PER_BLOCK = BLOCK * 4  # float32
+_BLOCK_SECS = BLOCK / SAMPLE_RATE
+
+# Blocos seguidos acima do limiar para valer como fala. Um estalo de teclado ou
+# uma batida na mesa passa fácil de 0,015 num bloco isolado — este microfone tem
+# mediana 0,006 e picos de 0,031 numa sala em silêncio. Exigir 240 ms contínuos
+# é o que separa "alguém falou" de "algo fez barulho".
+_FALA_MINIMA = 3
 
 
 @dataclass
@@ -132,6 +140,27 @@ def _skip_au_header(stream) -> None:
     return b""
 
 
+def _put(blocks: queue.Queue, bloco) -> None:
+    """Enfileira derrubando o mais velho quando a fila enche.
+
+    A fila só enche quando ninguém está consumindo — o ouvinte de palavra-chave
+    parado enquanto o Whisper e o LLM trabalham. Nesse estado o áudio de trinta
+    segundos atrás não serve para nada e o de agora, sim. Sem isto a fila cresce
+    sem teto enquanto a ditada é processada.
+    """
+    try:
+        blocks.put_nowait(bloco)
+        return
+    except queue.Full:
+        pass
+    try:
+        blocks.get_nowait()
+    except queue.Empty:
+        pass
+    with contextlib.suppress(queue.Full):
+        blocks.put_nowait(bloco)
+
+
 def _feed_pipewire(blocks: queue.Queue, stop: threading.Event, device: str | None):
     argv = ["pw-record", "--rate", str(SAMPLE_RATE), "--channels", "1", "--format", "f32"]
     if device:
@@ -146,14 +175,14 @@ def _feed_pipewire(blocks: queue.Queue, stop: threading.Event, device: str | Non
             pending = b""
             if not chunk or len(chunk) < _BYTES_PER_BLOCK:
                 break
-            blocks.put(np.frombuffer(chunk, dtype=np.float32))
+            _put(blocks, np.frombuffer(chunk, dtype=np.float32))
     finally:
         proc.terminate()
         try:
             proc.wait(timeout=1)
         except subprocess.TimeoutExpired:
             proc.kill()
-        blocks.put(None)  # sentinela: acabou
+        _put(blocks, None)  # sentinela: acabou
 
 
 def _feed_portaudio(blocks: queue.Queue, stop: threading.Event, device: str | None):
@@ -162,14 +191,83 @@ def _feed_portaudio(blocks: queue.Queue, stop: threading.Event, device: str | No
     def on_block(indata, _frames, _time, status):
         if status:
             print(f"[audio] {status}", file=sys.stderr)
-        blocks.put(indata[:, 0].copy())
+        _put(blocks, indata[:, 0].copy())
 
     with sd.InputStream(
         samplerate=SAMPLE_RATE, channels=1, dtype="float32",
         blocksize=BLOCK, device=device, callback=on_block,
     ):
         stop.wait()
-    blocks.put(None)
+    _put(blocks, None)
+
+
+# -- fluxo de captura ----------------------------------------------------
+
+
+class Stream:
+    """Uma captura viva, entregando blocos por uma fila.
+
+    Existe para que o ouvinte de palavra-chave e a gravação que ele dispara
+    sejam a MESMA captura. Subir um segundo pw-record no instante do disparo
+    custa 200-300 ms, e é justamente aí que está o começo da frase: quem falou a
+    palavra-chave já emendou o resto. Pelo atalho isso não acontece, porque
+    entre apertar a tecla e falar existe um instante — por isso `record()`
+    continua abrindo a sua própria captura quando ninguém lhe entrega uma.
+    """
+
+    def __init__(self, device: str | int | None = None, *, buffer_secs: float = 30.0):
+        self.blocks: queue.Queue = queue.Queue(
+            maxsize=max(1, int(buffer_secs / _BLOCK_SECS))
+        )
+        self.stop = threading.Event()
+        self.vivo = True
+        feed = _feed_pipewire if backend() == "pipewire" else _feed_portaudio
+        self.thread = threading.Thread(
+            target=feed, args=(self.blocks, self.stop, device), daemon=True
+        )
+        self.thread.start()
+
+    def get(self, timeout: float = 0.5) -> np.ndarray | None:
+        """Próximo bloco, ou None se nada chegou no prazo.
+
+        None não distingue "ainda não veio" de "acabou" de propósito: quase todo
+        laço só quer continuar esperando. Quem precisa da diferença olha `vivo`.
+        """
+        try:
+            bloco = self.blocks.get(timeout=timeout)
+        except queue.Empty:
+            return None
+        if bloco is None:  # sentinela do produtor
+            self.vivo = False
+            return None
+        return bloco
+
+    def drain(self) -> None:
+        """Descarta o que se acumulou enquanto ninguém consumia.
+
+        Sem isto o ouvinte volta a escutar a fala que ele acabou de ditar — e a
+        palavra-chave que a iniciou está no meio dela, então ele redispara.
+        """
+        while True:
+            try:
+                if self.blocks.get_nowait() is None:
+                    self.vivo = False
+                    return
+            except queue.Empty:
+                return
+
+    def close(self) -> None:
+        self.stop.set()
+        self.thread.join(timeout=2.0)
+
+
+@contextlib.contextmanager
+def stream(device: str | int | None = None, *, buffer_secs: float = 30.0):
+    fonte = Stream(device, buffer_secs=buffer_secs)
+    try:
+        yield fonte
+    finally:
+        fonte.close()
 
 
 # -- medidor -------------------------------------------------------------
@@ -207,28 +305,39 @@ def record(
     silence_threshold: float = 0.015,
     max_secs: float = 300.0,
     min_secs: float = 0.4,
+    wait_speech_secs: float = 0.0,
+    min_speech_secs: float = 0.0,
+    skip_secs: float = 0.0,
     stop_on_enter: bool = True,
     meter: bool = True,
     stop_event: threading.Event | None = None,
     save_to: Path | None = None,
     on_live: Callable[[], None] | None = None,
+    source: Stream | None = None,
 ) -> Recording:
     """Grava até você apertar Enter/Espaço, ou até o limite de tempo.
 
     Com `silence_secs` maior que zero, um silêncio dessa duração também
     encerra — desligado por padrão, porque cortar sozinho no meio de uma
-    pausa para pensar é pior do que apertar uma tecla.
-    """
-    blocks: queue.Queue = queue.Queue()
-    stop = stop_event if stop_event is not None else threading.Event()
-    stop.clear()
+    pausa para pensar é pior do que apertar uma tecla. A ditada aberta por
+    palavra-chave é a exceção: lá não há tecla para apertar, e é ela quem
+    passa `silence_secs`, `wait_speech_secs`, `min_speech_secs` e `skip_secs`.
 
-    feed = _feed_pipewire if backend() == "pipewire" else _feed_portaudio
-    producer = threading.Thread(target=feed, args=(blocks, stop, device), daemon=True)
-    producer.start()
+    `min_speech_secs` é o quanto de fala precisa ter entrado, somada, antes de
+    o corte por silêncio poder agir — e também o que a guarda de falso positivo
+    exige para não descartar. Com 0 (o caminho do atalho) nada muda.
+
+    Com `source`, consome uma captura já aberta em vez de abrir a sua — é o
+    que faz o ouvinte de palavra-chave e esta gravação serem o mesmo fluxo.
+    """
+    parar = stop_event if stop_event is not None else threading.Event()
+    parar.clear()
+
+    fonte = source if source is not None else Stream(device)
+    proprio = source is None
 
     if stop_on_enter and sys.stdin.isatty():
-        threading.Thread(target=_wait_key, args=(stop,), daemon=True).start()
+        threading.Thread(target=_wait_key, args=(parar,), daemon=True).start()
         hint_idle = "fale… (Enter ou Espaço encerra)"
     else:
         hint_idle = "fale…"
@@ -236,21 +345,35 @@ def record(
     sink = _Sink(save_to) if save_to else None
     collected: list[np.ndarray] = []
     speech_started = False
+    mudo = False
+    acima = 0
+    fala_blocos = 0
     silence_blocks = 0
-    silence_needed = int(silence_secs * SAMPLE_RATE / BLOCK)
-    max_blocks = int(max_secs * SAMPLE_RATE / BLOCK)
+    silence_needed = int(silence_secs / _BLOCK_SECS)
+    max_blocks = int(max_secs / _BLOCK_SECS)
+    espera_max = int(wait_speech_secs / _BLOCK_SECS)
+    fala_minima = int(min_speech_secs / _BLOCK_SECS)
+    pular = int(skip_secs / _BLOCK_SECS)
     ui = _Meter(meter)
 
     try:
         while len(collected) < max_blocks:
-            try:
-                block = blocks.get(timeout=0.5)
-            except queue.Empty:
-                if stop.is_set():
+            # Com a captura compartilhada o produtor sobrevive à gravação, então
+            # a sentinela dele não encerra mais este laço. Quem manda parar
+            # (o atalho de novo, o `talk --stop`) é este teste.
+            if parar.is_set():
+                break
+
+            block = fonte.get(timeout=0.5)
+            if block is None:
+                if not fonte.vivo:  # a captura caiu
                     break
                 continue
-            if block is None:  # produtor encerrou
-                break
+
+            # Descarta o rabo da palavra-chave, quando ele vaza na transcrição.
+            if pular:
+                pular -= 1
+                continue
 
             # Só agora o áudio está realmente entrando. Avisar antes disso é o
             # que fazia a pessoa começar a falar contra um stream que ainda não
@@ -264,29 +387,54 @@ def record(
 
             rms = float(np.sqrt(np.mean(block**2)))
             if rms > silence_threshold:
-                speech_started = True
+                acima += 1
+                fala_blocos += 1
+                if acima >= _FALA_MINIMA:
+                    speech_started = True
                 silence_blocks = 0
-            elif speech_started:
-                silence_blocks += 1
+            else:
+                acima = 0
+                if speech_started:
+                    silence_blocks += 1
 
             if speech_started:
                 tail = ""
                 if silence_needed and silence_blocks:
-                    left = (silence_needed - silence_blocks) * BLOCK / SAMPLE_RATE
+                    left = (silence_needed - silence_blocks) * _BLOCK_SECS
                     tail = f"  (corta em {left:.1f}s)"
-                ui.update(rms, f"gravando  {len(collected) * 0.1:5.1f}s{tail}")
+                ui.update(rms, f"gravando  {len(collected) * _BLOCK_SECS:5.1f}s{tail}")
             else:
                 ui.update(rms, hint_idle)
 
-            if silence_needed and speech_started and silence_blocks >= silence_needed:
+            # O corte por silêncio só arma depois de fala DE VERDADE. Sem o
+            # acumulado, o rabo da palavra-chave — 240 ms que sobram na fila
+            # quando o detector dispara — já ligava `speech_started`, e a pausa
+            # natural de quem espera o "pode falar" estourava os 2 s de silêncio
+            # antes da primeira palavra. A gravação saía com a sobra do "jarvis"
+            # e nada mais, e era descartada por curta. Pelo atalho isso nunca
+            # apareceu porque lá o corte por silêncio vem desligado.
+            if (silence_needed and speech_started
+                    and fala_blocos >= fala_minima
+                    and silence_blocks >= silence_needed):
+                break
+
+            # Abriu o microfone e ninguém falou: foi um ruído que soou como a
+            # palavra-chave. Mede pelo mesmo acumulado, senão o rabo da palavra
+            # desarmaria esta guarda também — e aí não sobra nenhuma saída.
+            if espera_max and fala_blocos < fala_minima and len(collected) >= espera_max:
+                mudo = True
                 break
     finally:
-        stop.set()
+        parar.set()  # solta o _wait_key, que fica em cbreak até ver isto
+        if proprio:
+            fonte.close()
         ui.clear()
 
     audio = np.concatenate(collected) if collected else np.zeros(0, dtype=np.float32)
 
-    if len(audio) / SAMPLE_RATE < min_secs:
+    # Curta demais para ser fala, ou disparo que não virou fala nenhuma: nos
+    # dois casos não há o que transcrever, e o arquivo em disco seria só lixo.
+    if mudo or len(audio) / SAMPLE_RATE < min_secs:
         if sink is not None:
             sink.abort()
         return Recording(np.zeros(0, dtype=np.float32))
