@@ -13,7 +13,7 @@ mesmo `lock`, no mesmo `_capturar` e no mesmo `_processar`.
 
 Protocolo: uma linha JSON por requisição, uma linha JSON de resposta.
   {"cmd": "ping"}
-  {"cmd": "dictate", "language": "pt", "mode": "clean", "to": "type"}
+  {"cmd": "dictate", "language": "pt", "to": "type"}
   {"cmd": "stop"}     encerra a gravação em andamento (de qualquer gatilho)
   {"cmd": "wake", "enable": false}   pausa/retoma o ouvinte de palavra-chave
   {"cmd": "quit"}
@@ -35,7 +35,7 @@ from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 
-from . import audio, config, output, polish, stt, voz, wake
+from . import audio, config, output, stt, voz, wake
 
 
 def _duracao(segundos: float) -> str:
@@ -170,7 +170,6 @@ class Daemon:
             cfg = replace(
                 self.cfg,
                 language=req.get("language", self.cfg.language),
-                mode=req.get("mode", self.cfg.mode),
                 to=req.get("to", self.cfg.to),
                 paste_key=req.get("paste_key", self.cfg.paste_key),
             )
@@ -256,17 +255,7 @@ class Daemon:
             notify("⃠ Nenhuma fala reconhecida", _kept(rec))
             return {"status": "empty", "recording": str(rec.path or "")}
 
-        polish.ensure_model(
-            cfg.llm,
-            on_start=lambda: notify("⬇ Baixando o modelo de limpeza…",
-                                    f"{cfg.llm} — só na primeira vez"),
-        )
-        final = polish.polish(
-            result.text, mode=cfg.mode, model=cfg.llm,
-            # o detectado, não o pedido: se você ditou em inglês com -l pt,
-            # o texto é inglês e é nele que a limpeza tem de ficar
-            language=result.language, keep_alive=cfg.keep_alive,
-        )
+        final = result.text
 
         try:
             delivered = output.deliver(final, cfg.targets, paste_key=cfg.paste_key)
@@ -291,7 +280,7 @@ class Daemon:
         if not suspect:
             rec.discard()
         prune(keep=cfg.keep_recordings)
-        return {"status": "ok", "text": final, "raw": result.text}
+        return {"status": "ok", "text": final}
 
     def _aquecer(self, cfg) -> None:
         """Sobe o Whisper enquanto a pessoa fala.

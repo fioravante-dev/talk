@@ -144,7 +144,7 @@ def _put(blocks: queue.Queue, bloco) -> None:
     """Enfileira derrubando o mais velho quando a fila enche.
 
     A fila só enche quando ninguém está consumindo — o ouvinte de palavra-chave
-    parado enquanto o Whisper e o LLM trabalham. Nesse estado o áudio de trinta
+    parado enquanto o Whisper trabalha. Nesse estado o áudio de trinta
     segundos atrás não serve para nada e o de agora, sim. Sem isto a fila cresce
     sem teto enquanto a ditada é processada.
     """

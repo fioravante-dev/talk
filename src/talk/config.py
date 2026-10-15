@@ -25,11 +25,6 @@ class Config:
     # vocabulário que o Whisper tende a errar: nomes próprios, siglas, jargão
     vocab: str = ""
 
-    # pós-processamento
-    mode: str = "clean"
-    llm: str = "qwen3:4b-instruct"
-    # quanto tempo o LLM fica na VRAM depois de usado (repassado ao Ollama)
-    keep_alive: str = "5m"
     # quanto tempo o Whisper fica na VRAM sem uso, antes de o daemon liberá-lo.
     # "never" o mantém para sempre; "0" libera logo após cada ditada.
     whisper_keep_alive: str = "5m"
@@ -65,7 +60,7 @@ class Config:
 
     # leitura em voz alta — o caminho inverso do resto do projeto.
     # Lê o que você SELECIONOU, não a tela. O Piper roda na CPU, então isto não
-    # disputa VRAM com o Whisper nem com o LLM.
+    # dispute VRAM com o Whisper.
     # piper é o padrão: 61 MB por voz e ~25x o tempo real, então ele nunca deixa
     # o player secar entre uma frase e outra. O kokoro soa mais natural num
     # trecho isolado, mas a 4,5x ele engasga em texto corrido — ver o README.
@@ -164,9 +159,6 @@ device = "cuda"
 compute_type = "int8_float16"
 language = "pt"            # remova para detecção automática
 
-mode = "clean"             # raw, clean, prompt, note, summary
-llm = "qwen3:4b-instruct"
-keep_alive = "5m"          # quanto tempo o LLM fica na VRAM depois do uso
 whisper_keep_alive = "5m"  # ocioso por esse tempo, o Whisper sai da VRAM
                            # ("never" mantém sempre; "0" libera após cada ditada)
 

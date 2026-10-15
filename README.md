@@ -1,7 +1,7 @@
 # talk
 
 Ditado por voz 100% local para Linux. Grava do microfone, transcreve com Whisper
-na GPU e passa o texto por um LLM que corrige pontuação e remove muletas de fala.
+na GPU.
 Aperta um atalho, fala, aperta de novo — o texto aparece onde o cursor estiver.
 Opcionalmente, uma palavra-chave abre a ditada sem tocar no teclado.
 
@@ -9,7 +9,7 @@ Nada sai da máquina. Sem API key, sem nuvem, sem assinatura.
 
 ```
       atalho ↘
-                microfone → pw-record → faster-whisper (GPU) → LLM via Ollama → cola no cursor
+                microfone → pw-record → faster-whisper (GPU) → cola no cursor
 palavra-chave ↗
 ```
 
@@ -19,18 +19,13 @@ palavra-chave ↗
 |---|---|---|
 | transcrição | Whisper `large-v3-turbo` via faster-whisper | ~1,2 GB |
 | detecção de voz | Silero VAD v6 | 1,2 MB, na CPU |
-| limpeza do texto | `qwen3:4b-instruct` via Ollama | ~3,1 GB |
 | palavra-chave (opcional) | `hey_jarvis` via openWakeWord | ~3,7 MB, na CPU |
 | leitura em voz alta (opcional) | Piper `faber` (ou Kokoro-82M) | ~121 MB, na CPU |
 
-Os dois são baixados por `talk --download`, ou sozinhos na primeira ditada se
+Whisper e os models opcional são baixados por
+`talk --download`, ou sozinhos na primeira ditada se
 você pular esse passo. Em repouso nada fica na VRAM: carregam quando você dita e
 saem depois de ociosos.
-
-O segundo modelo **não resume** — em ditado, resumir destrói o que você falou.
-Ele edita: pontuação, acentuação, remoção de "é...", "tipo", "né", e conversão de
-pontuação falada ("menos d" → `-d`, "barra home barra dev" → `/home/dev`).
-Resumir existe como modo opcional.
 
 ---
 
@@ -40,9 +35,9 @@ Testado em Pop!_OS 24.04 (COSMIC/Wayland). Deve funcionar em qualquer distro com
 PipeWire.
 
 **Pré-requisitos:** driver NVIDIA instalado (`nvidia-smi` precisa responder) e
-cerca de **7 GB de disco** — 2,6 GB de dependências Python, das quais a maior
-parte são as bibliotecas CUDA, mais 1,6 GB do Whisper e 2,5 GB do modelo de
-limpeza. Sem GPU funciona igual, só bem mais devagar, na CPU.
+cerca de **4,5 GB de disco** — 2,6 GB de dependências Python, das quais a maior
+parte são as bibliotecas CUDA, mais 1,6 GB do Whisper.
+Sem GPU funciona igual, só bem mais devagar, na CPU.
 
 ### 1. Dependências do sistema
 
@@ -56,11 +51,10 @@ sudo apt install wl-clipboard libnotify-bin ydotool
 
 O `pw-record`, que captura o áudio, já vem com o PipeWire.
 
-### 2. uv e Ollama
+### 2. uv
 
 ```bash
 curl -LsSf https://astral.sh/uv/install.sh | sh
-curl -fsSL https://ollama.com/install.sh | sh
 ```
 
 O instalador do `uv` acrescenta `~/.local/bin` ao seu PATH, mas só nas sessões
@@ -112,7 +106,6 @@ personalizados*:
 |---|---|
 | `Super+D` | `/CAMINHO/PARA/talk/.venv/bin/talk -l pt` |
 | `Super+Alt+D` | `/CAMINHO/PARA/talk/.venv/bin/talk -l en` |
-| `Super+Shift+D` | `/CAMINHO/PARA/talk/.venv/bin/talk -l pt -m email` |
 
 Use o caminho absoluto do seu clone. É só isso — não há serviço para instalar.
 
@@ -122,8 +115,8 @@ Use o caminho absoluto do seu clone. É só isso — não há serviço para inst
 talk --download
 ```
 
-Baixa os dois — Whisper e o modelo de limpeza — num comando só, com barra de
-progresso. São ~4 GB, então leva alguns minutos. Nada é carregado na VRAM: isso
+Baixa Whisper — num comando só, com barra de
+progresso. São ~1,6 GB, então leva alguns minutos. Nada é carregado na VRAM: isso
 é preparação de máquina, não uso.
 
 Você pode pular este passo: sem ele, os modelos são baixados sozinhos na
@@ -144,30 +137,16 @@ cala. Desligada por padrão — veja [Palavra-chave](#palavra-chave-hey-jarvis).
 **Pelo terminal:**
 
 ```bash
-talk                          # grava, limpa, imprime
-talk -m raw                   # só a transcrição, sem LLM
-talk -m prompt --to clipboard # vira um prompt bem-formado e copia
+talk                          # grava, transcribe, imprime
 talk --loop                   # ditado contínuo até Ctrl-C
-talk -f reuniao.m4a -m note   # transcreve um arquivo e organiza como nota
+talk -f reuniao.m4a   # transcreve um arquivo e organiza como nota
 talk -l en                    # ditado em inglês
-talk -m email                 # vira um e-mail formatado
 ```
 
 **A gravação vai até você mandar parar** — `Enter` ou `Espaço` no terminal, ou o
 mesmo atalho de novo. Ela não corta sozinha no silêncio: pausar para pensar no
 meio de uma frase é normal, e perder a fala por isso é pior do que apertar uma
 tecla. Para cortar por silêncio, `--silence-secs 1.5`.
-
-### Modos (`-m`)
-
-| modo | o que faz |
-|---|---|
-| `raw` | transcrição crua, sem LLM |
-| `clean` | pontuação e limpeza, preservando suas palavras (padrão) |
-| `prompt` | transforma fala solta em um pedido claro para um assistente |
-| `note` | organiza como nota em markdown |
-| `email` | formata como e-mail: assunto, saudação, parágrafos, despedida |
-| `summary` | resume em bullets |
 
 ### Saída (`--to`)
 
@@ -193,18 +172,15 @@ talk --paste-key ctrl+shift+v
 talk --init      # escreve ~/.config/talk/config.toml
 ```
 
-Todo campo também aceita variável de ambiente (`TALK_MODEL`, `TALK_LLM`,
-`TALK_MODE`…) e flag de linha de comando, nessa ordem de precedência.
+Todo campo também aceita variável de ambiente (`TALK_MODEL`, `TALK_DEVICE`…)
+e flag de linha de comando, nessa ordem de precedência.
 
 Os principais:
 
 | campo | padrão | o que faz |
 |---|---|---|
-| `mode` | `clean` | modo de pós-processamento |
 | `to` | `auto` | destino do texto |
-| `llm` | `qwen3:4b-instruct` | modelo de limpeza |
 | `whisper_keep_alive` | `5m` | ocioso por esse tempo, o Whisper sai da VRAM |
-| `keep_alive` | `5m` | o mesmo para o LLM, via Ollama |
 | `vocab` | vazio | termos que o Whisper costuma errar |
 | `wake` | `false` | ouvinte de palavra-chave (veja a seção abaixo) |
 | `wake_threshold` | `0.5` | limiar de disparo; calibre com `--wake-test` |
@@ -447,8 +423,8 @@ voz_pt = "pt_BR-cadu-medium"   # ou jeff; faber é o padrão
 voz_cadencia = 1.2             # variação de duração dos fonemas; >1.5 dá tremido
 ```
 
-Os dois rodam em ONNX na **CPU** e não disputam VRAM com o Whisper nem com o
-LLM. `voz_pt` e `voz_en` vazios usam a voz padrão do motor — trocar de motor
+Os dois rodam em ONNX na **CPU** e não disputam VRAM com o Whisper.
+`voz_pt` e `voz_en` vazios usam a voz padrão do motor — trocar de motor
 não obriga a trocar os nomes, que não têm nada em comum entre os dois catálogos.
 
 Duas armadilhas que custaram tempo, registradas para quem for reaproveitar:
@@ -463,7 +439,7 @@ Duas armadilhas que custaram tempo, registradas para quem for reaproveitar:
 
 - **61 MB por voz** do Piper em `~/.cache/talk/voices/` (ou 347 MB do Kokoro,
   em `~/.cache/talk/voices/kokoro/`).
-- **Zero VRAM.** Os dois rodam na CPU; o Whisper e o LLM seguem donos da GPU.
+- **Zero VRAM.** Os dois rodam na CPU.
 - A síntese nunca é o gargalo — a reprodução é. Por isso ela é frase a frase e
   vai direto para o player, em vez de esperar o texto inteiro.
 - O texto passa por uma limpeza determinística antes: URL vira "link", markdown
@@ -490,7 +466,6 @@ continua em `~/.cache/talk/recordings/` e a notificação diz onde:
 ```bash
 talk --recordings   # o que sobrou
 talk --last         # reprocessa a última, do começo
-talk --last -m raw  # ... sem passar pelo LLM
 ```
 
 ---
@@ -505,7 +480,6 @@ src/talk/
   wake.py     ouvinte de palavra-chave, openWakeWord em ONNX (opcional)
   voz.py      leitura em voz alta, Kokoro ou Piper, síntese frase a frase
   stt.py      faster-whisper, fallback para CPU, filtro de alucinação
-  polish.py   prompts do LLM, anti-injeção, fixação de idioma
   output.py   stdout / clipboard / paste / type, com fallbacks
   config.py   TOML < env < flags
   cuda.py     carrega as libs CUDA dos wheels nvidia-*

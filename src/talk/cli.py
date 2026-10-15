@@ -5,25 +5,23 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-import time
 
-from . import __version__, audio, config, daemon, output, polish, stt, voz, wake
+from . import __version__, audio, config, daemon, output, stt, voz, wake
 
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="talk",
-        description="Ditado por voz local: grava, transcreve com Whisper, limpa com um LLM.",
+        description="Ditado por voz local: grava e transcreve com Whisper.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""A gravação vai até você apertar Enter ou Espaço (ou o atalho de
 teclado de novo, quando disparada por tecla).
 
 exemplos:
-  talk                          grava e imprime o texto limpo
-  talk -m prompt --to clipboard vira um prompt e copia
-  talk -m raw                   sem LLM, só a transcrição
+  talk                          grava, transcreve e imprime
+  talk --to clipboard           copia o texto, sem colar
   talk --loop --to type         ditado contínuo direto no app focado
-  talk -f reuniao.m4a -m note   transcreve um arquivo e organiza como nota
+  talk -f reuniao.m4a           transcreve um arquivo de áudio
   talk --silence-secs 1.5       volta a cortar sozinho no silêncio
   talk --wake-test              calibra a palavra-chave, mostrando os scores
   talk --read                   lê em voz alta o texto que você selecionou
@@ -50,15 +48,6 @@ exemplos:
     g.add_argument("-l", "--language", help="idioma da fala; 'auto' para detectar")
     g.add_argument("--vocab", help="termos que o Whisper costuma errar")
 
-    g = p.add_argument_group("pós-processamento")
-    g.add_argument(
-        "-m", "--mode",
-        choices=["raw", "clean", "prompt", "note", "summary", "email"],
-        help="raw não usa LLM (padrão: clean)",
-    )
-    g.add_argument("--llm", help="modelo do Ollama para a limpeza")
-    g.add_argument("--system", help="instrução própria, substitui o modo")
-
     g = p.add_argument_group("saída")
     g.add_argument("--to", help="auto, stdout, clipboard, paste, type — separados por vírgula")
     g.add_argument("--paste-key", help="combinação de colar (padrão ctrl+v; terminais usam ctrl+shift+v)")
@@ -66,7 +55,7 @@ exemplos:
     g.add_argument("-q", "--quiet", action="store_true", help="sem medidor nem tempos")
     g.add_argument("--loop", action="store_true", help="fica ditando até Ctrl-C")
     g.add_argument("--download", action="store_true",
-                   help="baixa os dois modelos e sai (não carrega na VRAM)")
+                   help="baixa os modelos necessários e sai (não carrega na VRAM)")
     g.add_argument("--warmup", action="store_true", help="carrega o modelo na VRAM e sai")
     g.add_argument("--init", action="store_true", help="escreve um config.toml de exemplo")
 
@@ -98,8 +87,8 @@ exemplos:
 
 def _merge(cfg: config.Config, args: argparse.Namespace) -> config.Config:
     for name in (
-        "model", "device", "compute_type", "language", "vocab", "mode",
-        "llm", "to", "paste_key", "input_device", "silence_secs", "max_secs",
+        "model", "device", "compute_type", "language", "vocab", "to",
+        "paste_key", "input_device", "silence_secs", "max_secs",
         "wake", "wake_model", "wake_threshold", "read_language",
     ):
         value = getattr(args, name, None)
@@ -148,27 +137,15 @@ def _run_once(cfg: config.Config, args: argparse.Namespace) -> int:
             print("nenhuma fala reconhecida.", file=sys.stderr)
         return 1
 
-    started = time.monotonic()
-    final = polish.polish(
-        result.text,
-        mode=cfg.mode,
-        model=cfg.llm,
-        system=args.system,
-        language=result.language,
-        keep_alive=cfg.keep_alive,
-    )
-    polish_elapsed = time.monotonic() - started
+    final = result.text
 
     if args.json:
         print(json.dumps({
             "text": final,
-            "raw": result.text,
-            "mode": cfg.mode,
             "language": result.language,
             "language_probability": round(result.language_probability, 3),
             "audio_seconds": round(result.duration, 2),
             "stt_seconds": round(result.elapsed, 2),
-            "polish_seconds": round(polish_elapsed, 2),
         }, ensure_ascii=False))
         targets = [t for t in cfg.targets if t != "stdout"]
     else:
@@ -181,7 +158,7 @@ def _run_once(cfg: config.Config, args: argparse.Namespace) -> int:
         speed = result.duration / result.elapsed if result.elapsed else 0
         print(
             f"\033[2m  {result.duration:.1f}s de áudio · whisper {result.elapsed:.1f}s "
-            f"({speed:.0f}x) · llm {polish_elapsed:.1f}s\033[0m",
+            f"({speed:.0f}x)\033[0m",
             file=sys.stderr,
         )
     return 0
@@ -245,7 +222,6 @@ def _run_via_daemon(cfg: config.Config, args: argparse.Namespace) -> int:
     resp = daemon.request({
         "cmd": "dictate",
         "language": cfg.language or "auto",
-        "mode": cfg.mode,
         "to": ",".join(targets),
         "paste_key": cfg.paste_key,
     })
@@ -266,8 +242,7 @@ def _run_via_daemon(cfg: config.Config, args: argparse.Namespace) -> int:
 
     text = resp["text"]
     if args.json:
-        print(json.dumps({"text": text, "raw": resp.get("raw", ""), "mode": cfg.mode},
-                         ensure_ascii=False))
+        print(json.dumps({"text": text}, ensure_ascii=False))
     elif "stdout" in cfg.targets:
         print(text)
     return 0
@@ -293,8 +268,6 @@ def main(argv: list[str] | None = None) -> int:
         cfg = _merge(config.load(), args)
         print(f"transcrição · {cfg.model}", file=sys.stderr)
         stt.download(cfg.model)
-        # Antes do desvio do modo raw: a palavra-chave é ortogonal ao LLM, e
-        # quem dita em raw ainda pode querer abrir a ditada por voz.
         if cfg.wake:
             print(f"palavra-chave · {cfg.wake_model}", file=sys.stderr)
             try:
@@ -318,20 +291,7 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"[talk] {exc}", file=sys.stderr)
                 return 1
 
-        if cfg.mode == "raw":
-            print("modo raw: sem modelo de limpeza para baixar.", file=sys.stderr)
-            return 0
-        print(f"limpeza · {cfg.llm}", file=sys.stderr)
-        if not polish.available():
-            print(
-                "[talk] Ollama não respondeu — só o Whisper foi baixado. "
-                "Suba com `ollama serve` e rode de novo.",
-                file=sys.stderr,
-            )
-            return 1
-        if not polish.ensure_model(cfg.llm, progress=True):
-            return 1
-        print("pronto: os dois modelos estão no disco.", file=sys.stderr)
+        print("pronto: os modelos necessários estão no disco.", file=sys.stderr)
         return 0
 
     if args.recordings:
@@ -404,14 +364,6 @@ def main(argv: list[str] | None = None) -> int:
         code = _run_via_daemon(cfg, args)
         if code >= 0:
             return code  # o daemon cuidou; senão segue no modo local
-
-    if cfg.mode != "raw" and not args.file and not polish.available():
-        print(
-            "[talk] Ollama não respondeu — usando modo raw. "
-            "Inicie com `ollama serve` ou passe -m raw.",
-            file=sys.stderr,
-        )
-        cfg.mode = "raw"
 
     if args.warmup or args.loop:
         if not args.quiet:

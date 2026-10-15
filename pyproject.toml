@@ -1,7 +1,7 @@
 [project]
 name = "talk"
 version = "0.1.0"
-description = "Ditado por voz 100% local: grava, transcreve com Whisper na GPU e limpa com um LLM"
+description = "Ditado por voz 100% local: grava do microfone e transcreve com Whisper na GPU"
 readme = "README.md"
 requires-python = ">=3.12"
 license = "MIT"
