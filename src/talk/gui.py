@@ -29,7 +29,7 @@ import tomllib
 from dataclasses import fields as dataclass_fields
 from pathlib import Path
 
-from . import config, history, shortcuts
+from . import config, history, hotkeys
 
 GUI_PATH = config.CONFIG_PATH
 
@@ -529,6 +529,118 @@ _HINTS = {
 }
 
 
+# Qt's key codes for the keys a shortcut may end on, in the names COSMIC's
+# file uses. Anything else is refused with a sentence, not guessed at: a key
+# written under the wrong name is a shortcut that never fires.
+def _key_name(code: int) -> str:
+    from PySide6 import QtCore
+
+    Key = QtCore.Qt.Key
+    if Key.Key_A.value <= code <= Key.Key_Z.value:
+        return chr(code).lower()
+    if Key.Key_0.value <= code <= Key.Key_9.value:
+        return chr(code)
+    if Key.Key_F1.value <= code <= Key.Key_F35.value:
+        return f"F{code - Key.Key_F1.value + 1}"
+    if code == Key.Key_Space.value:
+        return "space"
+    return ""
+
+
+def _CaptureDialog(QtWidgets, parent, engine):
+    """A small window that records the next key combination pressed, says
+    whether it is free, and asks which language that key listens for.
+
+    Built lazily, like everything Qt here, because PySide6 is an optional
+    extra. A combination COSMIC already owns never reaches this window - the
+    desktop keeps it - so an unanswered press means "taken" as well.
+    """
+    from PySide6 import QtCore
+
+    Mod = QtCore.Qt.KeyboardModifier
+    names = ((Mod.MetaModifier, "Super"), (Mod.ControlModifier, "Ctrl"),
+             (Mod.AltModifier, "Alt"), (Mod.ShiftModifier, "Shift"))
+
+    class Capture(QtWidgets.QDialog):
+        def __init__(self):
+            super().__init__(parent)
+            self.setWindowTitle("Add shortcut")
+            self.combo = None
+            self.language = ""
+            self.setMinimumWidth(380)
+            layout = QtWidgets.QVBoxLayout(self)
+            layout.setContentsMargins(22, 20, 22, 18)
+            layout.setSpacing(10)
+            layout.addWidget(_label(QtWidgets, "Press the keys for the new shortcut",
+                                    f"color: {_PAPER}; font-size: 15px; font-weight: 600;"))
+            self.shown = _label(QtWidgets, "Waiting for keys",
+                                f"color: {_QUIET}; font-family: {_SPOKEN}; font-size: 22px;")
+            layout.addWidget(self.shown)
+            self.verdict = _quiet(QtWidgets, "Use Super, Ctrl, Alt or Shift with a letter, "
+                                             "a digit or a function key.")
+            self.verdict.setWordWrap(True)
+            layout.addWidget(self.verdict)
+
+            row = QtWidgets.QHBoxLayout()
+            row.addWidget(_label(QtWidgets, "Listens for", f"color: {_PAPER};"))
+            self.items = _options("language", {"language": ""})
+            self.languages = QtWidgets.QComboBox()
+            self.languages.addItems([item[0] for item in self.items])
+            self.languages.setFocusPolicy(QtCore.Qt.NoFocus)  # keys belong to the capture
+            row.addWidget(self.languages, 1)
+            layout.addLayout(row)
+
+            buttons = QtWidgets.QHBoxLayout()
+            buttons.addStretch(1)
+            cancel = _button(QtWidgets, "Cancel", self.reject)
+            cancel.setFocusPolicy(QtCore.Qt.NoFocus)
+            self.ok = _button(QtWidgets, "Add shortcut", self._accept, name="primary")
+            self.ok.setFocusPolicy(QtCore.Qt.NoFocus)
+            self.ok.setEnabled(False)
+            buttons.addWidget(cancel)
+            buttons.addWidget(self.ok)
+            layout.addLayout(buttons)
+            self.setFocusPolicy(QtCore.Qt.StrongFocus)
+
+        def keyPressEvent(self, event):
+            if event.key() == QtCore.Qt.Key.Key_Escape and not event.modifiers():
+                self.reject()
+                return
+            mods = [name for flag, name in names if event.modifiers() & flag]
+            key = _key_name(event.key())
+            if not key:
+                # A modifier on its own is the start of a combination, not one.
+                self.shown.setText(" + ".join(mods + ["…"]) if mods else "Waiting for keys")
+                return
+            self.combo = None
+            self.ok.setEnabled(False)
+            try:
+                combo = hotkeys.combo(mods, key)
+            except hotkeys.HotkeyError as exc:
+                self.shown.setText(hotkeys.label(mods, key))
+                self.verdict.setStyleSheet(f"color: {_HALT}; font-size: 12px;")
+                said = str(exc)
+                self.verdict.setText(said[:1].upper() + said[1:] + ".")
+                return
+            self.shown.setText(hotkeys.label(*combo))
+            if (owner := engine.taken(*combo)):
+                self.verdict.setStyleSheet(f"color: {_HALT}; font-size: 12px;")
+                self.verdict.setText(f"Already used by {owner}. Try another combination.")
+                return
+            self.combo = combo
+            self.ok.setEnabled(True)
+            self.verdict.setStyleSheet(f"color: {_LISTEN}; font-size: 12px;")
+            self.verdict.setText("Free. Choose the language, then add it.")
+
+        def _accept(self):
+            self.language = self.items[self.languages.currentIndex()][1]["language"]
+            self.accept()
+
+    dialog = Capture()
+    dialog.setStyleSheet(_style())
+    return dialog
+
+
 class Configurator:
     """Rows of knobs: a label and a dropdown of the values the loader accepts.
 
@@ -615,96 +727,152 @@ class Configurator:
         translate.setEnabled(not qwen)
 
     def _shortcut_rows(self, grid, row: int) -> None:
-        """One dropdown per dictation shortcut: the language that key hears.
+        """The dictation shortcuts, in a box of their own so add and remove can
+        rebuild it without touching the knobs above.
 
-        The language a shortcut pins outranks config.toml, so leaving it out
-        of this window is how English speech kept coming back in Portuguese.
-        A binding whose command the CLI rejects says so in the warning hue,
-        because that key does nothing at all when pressed.
+        Unlike the knobs, these apply as they change: the desktop reads the
+        keys on every press, so there is nothing to restart, and a Save button
+        would only be a second place where a change can be forgotten.
         """
         Qw = self.QtWidgets
-        self.shortcut_text = shortcuts.read()
-        self.shortcuts: list[tuple] = []
-        found = shortcuts.parse(self.shortcut_text)
-        if not found:
-            return
         grid.setRowMinimumHeight(row, 14)
-        grid.addWidget(_label(Qw, "Keyboard shortcuts",
-                              f"color: {_PAPER}; font-size: 15px; font-weight: 600;"), row + 1, 0, 1, 2)
-        row += 2
-        for shortcut in found:
+        head = Qw.QHBoxLayout()
+        head.addWidget(_label(Qw, "Keyboard shortcuts",
+                              f"color: {_PAPER}; font-size: 15px; font-weight: 600;"))
+        head.addStretch(1)
+        self.add_key = _button(Qw, "Add shortcut", self._add_hotkey)
+        head.addWidget(self.add_key)
+        grid.addLayout(head, row + 1, 0, 1, 2)
+        self.keys_note = _quiet(Qw, "")
+        self.keys_note.setWordWrap(True)
+        grid.addWidget(self.keys_note, row + 2, 0, 1, 2)
+        self.keys_box = Qw.QWidget()
+        grid.addWidget(self.keys_box, row + 3, 0, 1, 2)
+        try:
+            self.engine = hotkeys.engine()
+        except hotkeys.HotkeyError as exc:
+            self.engine = None
+            self.add_key.setEnabled(False)
+            self.keys_note.setText(f"Shortcuts can't be set from here: {exc}.")
+            return
+        self.keys_note.setText("Changes apply right away; the next press uses them.")
+        self._fill_hotkeys()
+
+    def _fill_hotkeys(self) -> None:
+        Qw = self.QtWidgets
+        old = self.keys_box.layout()
+        if old is not None:
+            while (item := old.takeAt(0)) is not None:
+                if item.widget() is not None:
+                    item.widget().deleteLater()
+            Qw.QWidget().setLayout(old)  # a widget keeps one layout: hand the old one away
+        grid = Qw.QGridLayout(self.keys_box)
+        grid.setContentsMargins(0, 4, 0, 0)
+        grid.setHorizontalSpacing(28)
+        grid.setVerticalSpacing(14)
+        grid.setColumnStretch(0, 1)
+        try:
+            found = self.engine.list()
+        except OSError as exc:
+            self.keys_note.setText(f"Could not read the shortcuts: {exc}.")
+            return
+        if not found:
+            grid.addWidget(_quiet(Qw, "No dictation shortcut yet. Add one to start dictating from the keyboard."), 0, 0, 1, 3)
+        for row, hotkey in enumerate(found):
             words = Qw.QWidget()
             stack = Qw.QVBoxLayout(words)
             stack.setContentsMargins(0, 0, 0, 0)
             stack.setSpacing(2)
-            stack.addWidget(_label(Qw, shortcut.keys, f"color: {_PAPER};"))
-            if shortcut.broken:
-                note = _label(Qw, f"This key fails: talk no longer accepts {shortcut.broken}.",
+            stack.addWidget(_label(Qw, hotkey.keys, f"color: {_PAPER};"))
+            if hotkey.broken:
+                # This key does nothing when pressed: say it in the warning hue.
+                note = _label(Qw, f"This key fails: talk no longer accepts {hotkey.broken}.",
                               f"color: {_HALT}; font-size: 12px;")
             else:
                 note = _quiet(Qw, "The language this key listens for.")
             note.setWordWrap(True)
             stack.addWidget(note)
 
-            today = {"language": shortcut.language}
+            today = {"language": hotkey.language}
             items = _options("language", today)
             combo = Qw.QComboBox()
             combo.setFixedWidth(250)
             combo.addItems([item[0] for item in items])
             combo.setCurrentIndex(_index(items, today))
-            combo.currentIndexChanged.connect(self._changed)
-            self.shortcuts.append((combo, items, combo.currentIndex()))
+            combo.currentIndexChanged.connect(
+                lambda index, hotkey=hotkey, items=items: self._set_hotkey_language(hotkey, items[index])
+            )
+            remove = _button(Qw, "Remove", lambda _c=False, hotkey=hotkey: self._remove_hotkey(hotkey))
+            # Remove sits left of the dropdown, so the dropdowns keep the
+            # same right edge as the knobs above them.
+            controls = Qw.QHBoxLayout()
+            controls.setSpacing(6)
+            controls.addWidget(remove)
+            controls.addWidget(combo)
             grid.addWidget(words, row, 0)
-            grid.addWidget(combo, row, 1)
-            row += 1
+            grid.addLayout(controls, row, 1)
 
-    def _shortcuts_dirty(self) -> bool:
-        return any(combo.currentIndex() != start for combo, _items, start in getattr(self, "shortcuts", []))
+    def _hotkey_said(self, words: str) -> None:
+        self.keys_note.setText(words)
+
+    def _set_hotkey_language(self, hotkey, item) -> None:
+        label, writes = item
+        try:
+            self.engine.set_language(hotkey, writes["language"])
+        except (OSError, hotkeys.HotkeyError) as exc:
+            self._hotkey_said(f"Could not change {hotkey.keys}: {exc}.")
+            return
+        self._hotkey_said(f"{hotkey.keys} now listens for: {label}.")
+
+    def _remove_hotkey(self, hotkey) -> None:
+        Qw = self.QtWidgets
+        sure = Qw.QMessageBox.question(
+            self.keys_box, "Remove shortcut",
+            f"Remove {hotkey.keys}? That key stops starting a dictation.",
+        )
+        if sure != Qw.QMessageBox.Yes:
+            return
+        try:
+            self.engine.remove(hotkey)
+        except (OSError, hotkeys.HotkeyError) as exc:
+            self._hotkey_said(f"Could not remove {hotkey.keys}: {exc}.")
+            return
+        self._fill_hotkeys()
+        self._hotkey_said(f"Removed {hotkey.keys}.")
+
+    def _add_hotkey(self) -> None:
+        dialog = _CaptureDialog(self.QtWidgets, self.keys_box, self.engine)
+        if dialog.exec() != self.QtWidgets.QDialog.Accepted or dialog.combo is None:
+            return
+        mods, key = dialog.combo
+        try:
+            added = self.engine.add(mods, key, dialog.language)
+        except (OSError, hotkeys.HotkeyError) as exc:
+            self._hotkey_said(f"Could not add the shortcut: {exc}.")
+            return
+        self._fill_hotkeys()
+        self._hotkey_said(f"Added {added.keys}. Press it to start a dictation.")
 
     def _changed(self) -> None:
         self._guard()
-        dirty = _patch(self.text, self._typed()) != self.text or self._shortcuts_dirty()
+        dirty = _patch(self.text, self._typed()) != self.text
         self.button.setEnabled(dirty)
         self.saved.setText("You have unsaved changes." if dirty else "")
 
-    def save_shortcuts(self) -> bool:
-        """Writes the shortcuts' languages back into COSMIC's file, one binding
-        at a time; returns whether anything changed. Each edit shifts the
-        offsets after it, so the file is parsed again before the next one."""
-        if not self._shortcuts_dirty():
-            return False
-        text = shortcuts.read()
-        for position, (combo, items, _start) in enumerate(self.shortcuts):
-            language = items[combo.currentIndex()][1]["language"]
-            found = shortcuts.parse(text)
-            if position < len(found):
-                text = shortcuts.set_language(text, found[position], language)
-        shortcuts.save(text)
-        self.shortcuts = [(c, i, c.currentIndex()) for c, i, _s in self.shortcuts]
-        return True
-
     def _save(self) -> None:
-        """The button's press: the window goes back over the files, and says
-        what is already live and what still waits for a restart."""
-        config_dirty = _patch(self.text, self._typed()) != self.text
+        """The button's press: the window goes back over the file, and says where."""
         try:
-            keys = self.save_shortcuts()
-            where = self.save() if config_dirty else None
+            where = self.save()
         except OSError as exc:
             # The words say what happened and what is still true: a silent
             # failure would leave someone convinced the knobs took effect.
             self.saved.setText(f"Could not write the file: {exc}. It stays as it is.")
             return
+        # The daemon reads the file once, at start: saying "saved" alone would
+        # promise a change the running dictation does not see yet.
         self.text = _read_config_text()
         self.button.setEnabled(False)
-        said = []
-        if keys:
-            said.append("Shortcuts saved; the next press uses them.")
-        if where:
-            # The daemon reads the file once, at start: saying "saved" alone
-            # would promise a change the running dictation does not see yet.
-            said.append(f"Settings saved to {_home(where)}. Restart the daemon to apply them.")
-        self.saved.setText(" ".join(said))
+        self.saved.setText(f"Saved to {_home(where)}. Restart the daemon to apply it.")
 
     def _typed(self) -> dict:
         """The dropdown selections, expanded to the config keys each one writes."""
