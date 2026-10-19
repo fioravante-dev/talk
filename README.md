@@ -1,7 +1,6 @@
 # talk
 
-Ditado por voz 100% local para Linux. Grava do microfone, transcreve com Whisper
-na GPU.
+Ditado por voz 100% local para Linux. Grava do microfone, transcreve na GPU.
 Aperta um atalho, fala, aperta de novo — o texto aparece onde o cursor estiver.
 Opcionalmente, uma palavra-chave abre a ditada sem tocar no teclado.
 
@@ -9,7 +8,7 @@ Nada sai da máquina. Sem API key, sem nuvem, sem assinatura.
 
 ```
       atalho ↘
-                microfone → pw-record → faster-whisper (GPU) → cola no cursor
+                microfone → pw-record → STT engine (GPU) → cola no cursor
 palavra-chave ↗
 ```
 
@@ -17,7 +16,8 @@ palavra-chave ↗
 
 | papel | modelo | VRAM |
 |---|---|---|
-| transcrição | Whisper `large-v3-turbo` via faster-whisper | ~1,2 GB |
+| transcrição (default) | Whisper `large-v3-turbo` via faster-whisper | ~1,2 GB |
+| transcrição (`stt_motor = "qwen"`) | `Qwen3-ASR-1.7B` | ~4 GB |
 | detecção de voz | Silero VAD v6 | 1,2 MB, na CPU |
 | palavra-chave (opcional) | `hey_jarvis` via openWakeWord | ~3,7 MB, na CPU |
 | leitura em voz alta (opcional) | Piper `faber` (ou Kokoro-82M) | ~121 MB, na CPU |
@@ -26,6 +26,56 @@ Whisper e os models opcional são baixados por
 `talk --download`, ou sozinhos na primeira ditada se
 você pular esse passo. Em repouso nada fica na VRAM: carregam quando você dita e
 saem depois de ociosos.
+
+## Transcription engines
+
+Two engines, one interface. `stt_motor` picks one; the caller never branches on
+it, it asks for a capability and the dispatcher refuses what the engine lacks.
+
+| engine | `stt_motor` | extra | languages | translate | hotwords | VAD |
+|---|---|---|---|---|---|---|
+| Qwen3-ASR-1.7B | `qwen` | `qwen` | 30, auto-detected | no | no | no |
+| faster-whisper (default) | `whisper` | none | 99 | yes, into English only | yes | yes |
+
+Whisper is the default: on an RTX 3060 with 6 GB it loads in ~3 s against
+Qwen's ~9 s, holds ~1.1 GB of VRAM against ~4.6 GB, and only Whisper translates.
+Both detect the spoken language. Pinning `language = "pt"` on a multilingual
+model conditions the decoder on that token, and English speech comes back as
+Portuguese text - a translation, not a transcription. That is why the default
+`language` is empty.
+
+Qwen stays one extra away:
+
+```bash
+uv sync --extra qwen          # Qwen3-ASR + torch (~4 GB of weights)
+```
+
+```toml
+stt_motor = "qwen"            # loads only when asked, never next to Whisper
+```
+
+Asking Qwen to translate raises instead of quietly doing nothing - the
+capability asymmetry is checked, not ignored.
+
+The torch path needs one system package that the wheels do not cover: Triton
+JIT-compiles a CUDA helper that `#include <Python.h>`, and Ubuntu ships no
+headers for the interpreter that `uv` manages.
+
+```bash
+sudo apt install libpython3.12-dev   # 5.7 MB, only for the qwen engine
+```
+
+Missing them is not a bug in this project: the run dies inside torch's forward
+pass while gcc looks for `/usr/include/python3.12/Python.h`. The package puts
+the headers exactly there. The failure is what `-m asr` reproduces; the remedy
+is read off that gcc line, and no test covers it.
+
+The real-model smoke test is opt-in, because it downloads ~4 GB and needs a
+GPU:
+
+```bash
+uv run pytest -m asr          # the default run skips it (`-m 'not asr'` in addopts)
+```
 
 ---
 
@@ -216,6 +266,31 @@ talk --no-daemon # ignora o daemon nesta chamada
 ```
 
 O log dele fica em `~/.cache/talk/daemon.log`.
+
+## Desktop GUI
+
+Optional: the CLI is the whole product. The window edits the same
+`~/.config/talk/config.toml` the CLI reads, so the two can never disagree -
+the loader is the proof.
+
+```bash
+uv sync --extra gui                    # PySide6 (~30 MB of Qt)
+uv run python -m talk.gui              # from inside the project directory
+```
+
+Two surfaces in one window:
+
+- **Configurator** - one row per knob, the current value read from the file,
+  an editable line. Saving patches that one key in place: comments, blank
+  lines and keys this project never heard of survive, and a commented knob is
+  uncommented rather than appended (the file would carry the key twice).
+- **Panel** - the daemon's own `ping()` rendered as status lines, plus the last
+  dictations from `~/.cache/talk/history.jsonl`, each with a **copy** button
+  that sends an old text back to the clipboard.
+
+The history is written only on successful delivery, so a failed dictation is
+not in it. `--recordings` still points at the audio; the history is the text
+half.
 
 ---
 
@@ -479,7 +554,11 @@ src/talk/
   audio.py    captura via pw-record, fluxo compartilhado, gravação em disco
   wake.py     ouvinte de palavra-chave, openWakeWord em ONNX (opcional)
   voz.py      leitura em voz alta, Kokoro ou Piper, síntese frase a frase
-  stt.py      faster-whisper, fallback para CPU, filtro de alucinação
+  stt.py      dispatcher: motor, capability check, Transcript
+  stt_qwen.py Qwen3-ASR engine (default), torch lifecycle
+  stt_whisper.py faster-whisper engine, CPU fallback, hallucination filter
+  history.py  JSONL text history under ~/.cache/talk
+  gui.py      PySide6 configurator + live panel (optional extra)
   output.py   stdout / clipboard / paste / type, com fallbacks
   config.py   TOML < env < flags
   cuda.py     carrega as libs CUDA dos wheels nvidia-*

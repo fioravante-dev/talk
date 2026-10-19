@@ -35,7 +35,7 @@ from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 
-from . import audio, config, output, stt, voz, wake
+from . import audio, config, history, output, stt, voz, wake
 
 
 def _duracao(segundos: float) -> str:
@@ -136,7 +136,7 @@ class Daemon:
             return
         while True:
             time.sleep(min(max(ttl / 4, 2.0), 30.0))
-            if self.recording.is_set() or not stt.is_loaded():
+            if self.recording.is_set() or not stt.is_loaded(motor=self.cfg.stt_motor):
                 continue
             if time.monotonic() - self.last_used < ttl:
                 continue
@@ -144,7 +144,7 @@ class Daemon:
             if not self.lock.acquire(blocking=False):
                 continue
             try:
-                stt.unload()
+                stt.unload(motor=self.cfg.stt_motor)
                 print("[talk] ocioso: modelo liberado da VRAM", file=sys.stderr)
             finally:
                 self.lock.release()
@@ -173,8 +173,6 @@ class Daemon:
                 to=req.get("to", self.cfg.to),
                 paste_key=req.get("paste_key", self.cfg.paste_key),
             )
-            if cfg.language in ("auto", ""):
-                cfg.language = None
 
             rec = self._capturar(cfg)
             if rec.seconds == 0:
@@ -238,16 +236,18 @@ class Daemon:
         É tudo o que a tecla e a voz têm em comum depois que o áudio existe.
         O lock e o relógio de ociosidade são de quem chamou, não daqui.
         """
-        if stt.is_loaded():
+        if stt.is_loaded(motor=cfg.stt_motor):
             notify("✍ Transcrevendo…", f"{rec.seconds:.0f}s")
         else:
             notify("✍ Carregando o modelo…", f"{rec.seconds:.0f}s de áudio guardados")
         result = stt.transcribe(  # a partir daqui, o áudio já está salvo
             rec.audio,
-            model=cfg.model,
+            motor=cfg.stt_motor,
+            model=cfg.active_model,
             device=cfg.device,
             compute_type=cfg.compute_type,
             language=cfg.language,
+            translate=cfg.translate,
             initial_prompt=cfg.initial_prompt,
             beam_size=cfg.beam_size,
         )
@@ -263,6 +263,15 @@ class Daemon:
             notify("⚠ Falha na saída", f"{exc}\n{_kept(rec)}")
             return {"status": "error", "error": str(exc), "text": final,
                     "recording": str(rec.path or "")}
+
+        history.record(
+            final,
+            delivered=delivered,
+            language=result.language,
+            motor=cfg.stt_motor,
+            audio_seconds=result.duration,
+            stt_seconds=result.elapsed,
+        )
 
         preview = final[:120] + ("…" if len(final) > 120 else "")
         wanted = {"type", "paste"} & set(cfg.targets)
@@ -291,12 +300,14 @@ class Daemon:
         terminou. Carregar em paralelo à gravação esconde a espera dentro da
         própria fala.
         """
-        if stt.is_loaded():
+        if stt.is_loaded(motor=cfg.stt_motor):
             return
 
         def tarefa():
             try:
-                stt.warmup(cfg.model, cfg.device, cfg.compute_type)
+                stt.warmup(
+                    cfg.active_model, cfg.device, cfg.compute_type, motor=cfg.stt_motor
+                )
             except Exception as exc:  # aquecer é melhor esforço, nunca fatal
                 print(f"[talk] aquecimento falhou: {exc!r}", file=sys.stderr)
 

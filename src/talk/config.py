@@ -17,10 +17,23 @@ CONFIG_PATH = Path(
 @dataclass
 class Config:
     # transcrição
+    # Two engines, one interface: the caller never branches on the motor, it
+    # asks for a capability and the dispatcher refuses what the motor lacks.
+    stt_motor: str = "whisper"
+    # Whisper only. Qwen3-ASR transcribes what it hears, in the language it
+    # hears; asking it to translate raises instead of quietly doing nothing.
+    translate: bool = False
+    # Whisper weights. The name stays Whisper's own so --model and the daemon
+    # keep working; active_model is what actually gets loaded.
     model: str = "large-v3-turbo"
+    qwen_model: str = "Qwen/Qwen3-ASR-1.7B"
     device: str = "cuda"
     compute_type: str = "int8_float16"
-    language: str | None = "pt"
+    # None = let the model detect the spoken language. Pinning one conditions
+    # the decoder on that language token, and the model is multilingual: English
+    # speech under a "pt" pin comes back as Portuguese text — a translation, not
+    # a transcription. That is why the default is not "pt".
+    language: str | None = None
     beam_size: int = 5
     # vocabulário que o Whisper tende a errar: nomes próprios, siglas, jargão
     vocab: str = ""
@@ -80,6 +93,20 @@ class Config:
     # Quantas gravações de ditadas que falharam guardar em ~/.cache/talk
     keep_recordings: int = 20
 
+    def __post_init__(self) -> None:
+        # One place normalizes, so the cli and the daemon cannot disagree about
+        # what "auto" means. dataclasses.replace() runs this too, which is why
+        # the daemon's request handling needs no normalization of its own.
+        if self.language in ("auto", ""):
+            self.language = None
+        if self.device == "auto":
+            self.device = "cuda"
+
+    @property
+    def active_model(self) -> str:
+        """The weights that actually get loaded, per motor."""
+        return self.qwen_model if self.stt_motor == "qwen" else self.model
+
     @property
     def initial_prompt(self) -> str | None:
         return self.vocab or None
@@ -126,29 +153,28 @@ def _bool(texto: str) -> bool:
 
 
 def load() -> Config:
-    cfg = Config()
+    """TOML < environment, both normalized by Config.__post_init__."""
+    values: dict = {}
 
     if CONFIG_PATH.is_file():
         data = tomllib.loads(CONFIG_PATH.read_text())
         known = {f.name for f in fields(Config)}
-        for key, value in data.items():
-            if key in known:
-                setattr(cfg, key, value)
+        values.update({k: v for k, v in data.items() if k in known})
 
     for f in fields(Config):
         env = os.environ.get(f"TALK_{f.name.upper()}")
         if env is None:
             continue
         if f.type in ("float", "float | None"):
-            setattr(cfg, f.name, float(env))
+            values[f.name] = float(env)
         elif f.type == "bool":
-            setattr(cfg, f.name, _bool(env))
+            values[f.name] = _bool(env)
         elif f.type in ("int", "int | None"):
-            setattr(cfg, f.name, int(env))
+            values[f.name] = int(env)
         else:
-            setattr(cfg, f.name, env)
+            values[f.name] = env
 
-    return cfg
+    return Config(**values)
 
 
 DEFAULT_TOML = """\
@@ -157,7 +183,10 @@ DEFAULT_TOML = """\
 model = "large-v3-turbo"   # tiny, base, small, medium, large-v3, large-v3-turbo
 device = "cuda"
 compute_type = "int8_float16"
-language = "pt"            # remova para detecção automática
+stt_motor = "whisper"        # whisper (faster-whisper) ou qwen (Qwen3-ASR)
+translate = false            # only whisper can translate; qwen raises instead
+qwen_model = "Qwen/Qwen3-ASR-1.7B"
+# language = "pt"            # pin one language; commented = the model detects it
 
 whisper_keep_alive = "5m"  # ocioso por esse tempo, o Whisper sai da VRAM
                            # ("never" mantém sempre; "0" libera após cada ditada)

@@ -1,14 +1,15 @@
 [project]
 name = "talk"
 version = "0.1.0"
-description = "Ditado por voz 100% local: grava do microfone e transcreve com Whisper na GPU"
+description = "Ditado por voz 100% local: grava do microfone e transcreve na GPU"
 readme = "README.md"
 requires-python = ">=3.12"
 license = "MIT"
 license-files = ["LICENSE"]
-keywords = ["dictation", "speech-to-text", "whisper", "wayland", "local-ai", "voice-typing"]
+keywords = ["dictation", "speech-to-text", "whisper", "wayland", "local-ai", "voice-typing", "qwen-asr"]
 classifiers = [
     "Environment :: Console",
+    "Environment :: X11 Applications :: Qt",
     "Intended Audience :: End Users/Desktop",
     "Operating System :: POSIX :: Linux",
     "Topic :: Multimedia :: Sound/Audio :: Speech",
@@ -46,8 +47,47 @@ wake = [
 voz = ["kokoro-onnx>=0.5.0"]
 voz-leve = ["piper-tts>=1.4.2"]
 
+# Test runner. Opcional de propósito: `uv run pytest` needs it, the installed
+# app never imports it.
+test = ["pytest>=8.4"]
+
+# Qwen3-ASR — the alternative transcription engine. Optional on purpose: ~4 GB of
+# weights plus torch, and an engine asked for without its packages says which
+# extra is missing instead of crashing on import.
+#
+# No versions pinned on purpose: uv resolves the latest, and a pin guessed from
+# a doc is worse than no pin. Caveat when you do sync: the default PyPI torch
+# wheel is the +cpu one. The CUDA build comes from the pytorch index wired at
+# the bottom of this file, whose name carries the CUDA version the driver
+# reports (see [tool.uv.index] and [tool.uv.sources]).
+qwen = ["qwen-asr", "transformers", "torch"]
+
+# Desktop GUI (configurator + live panel). Optional on purpose: the app stays
+# usable from the CLI alone, and PySide6 is ~30 MB of Qt.
+gui = ["pyside6"]
+
+[tool.pytest.ini_options]
+# The real-engine smoke test is opt-in: it downloads ~4 GB and needs a GPU, so
+# the default run must not reach it. `-m asr` on the command line overrides.
+addopts = "-m 'not asr'"
+markers = [
+    "asr: real Qwen3-ASR smoke test, opt-in with -m asr",
+]
+
 [project.scripts]
 talk = "talk.cli:main"
+
+# The CUDA torch wheel: the number in the index name is the CUDA version the
+# driver reports (nvidia-smi prints it), not a torch release. PyPI alone would
+# give the +cpu build, which leaves the qwen engine crawling on the CPU.
+# explicit = true keeps PyPI the default for every other package.
+[[tool.uv.index]]
+name = "pytorch-cu130"
+url = "https://download.pytorch.org/whl/cu130"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu130" }
 
 # O openwakeword 0.6.0 declara tflite-runtime no Linux. Esse pacote parou na
 # 2.14.0 (out/2023) e nunca teve wheel para cp312: sem isto a resolução falha

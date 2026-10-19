@@ -5,8 +5,9 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from dataclasses import replace
 
-from . import __version__, audio, config, daemon, output, stt, voz, wake
+from . import __version__, audio, config, daemon, history, output, stt, voz, wake
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -42,7 +43,11 @@ exemplos:
                    help="lista as gravações guardadas e sai")
 
     g = p.add_argument_group("transcrição")
-    g.add_argument("--model", help="modelo Whisper (padrão: large-v3-turbo)")
+    g.add_argument("--stt-motor", choices=["qwen", "whisper"],
+                   help="transcription engine (default: whisper)")
+    g.add_argument("--translate", action=argparse.BooleanOptionalAction, default=None,
+                   help="translate to English (whisper only; qwen raises)")
+    g.add_argument("--model", help="Whisper weights (padrão: large-v3-turbo)")
     g.add_argument("--device", choices=["cuda", "cpu", "auto"], help="onde rodar o Whisper")
     g.add_argument("--compute-type", help="int8_float16, float16, int8…")
     g.add_argument("-l", "--language", help="idioma da fala; 'auto' para detectar")
@@ -86,19 +91,20 @@ exemplos:
 
 
 def _merge(cfg: config.Config, args: argparse.Namespace) -> config.Config:
-    for name in (
-        "model", "device", "compute_type", "language", "vocab", "to",
-        "paste_key", "input_device", "silence_secs", "max_secs",
-        "wake", "wake_model", "wake_threshold", "read_language",
-    ):
-        value = getattr(args, name, None)
-        if value is not None:
-            setattr(cfg, name, value)
-    if cfg.language in ("auto", ""):
-        cfg.language = None
-    if cfg.device == "auto":
-        cfg.device = "cuda"
-    return cfg
+    """Flags over TOML/env. replace() rebuilds the Config, which re-runs
+    __post_init__ — so "auto" from a flag normalizes the same way it does
+    coming from the TOML or the environment."""
+    overrides = {
+        name: value
+        for name in (
+            "model", "device", "compute_type", "language", "vocab", "to",
+            "stt_motor", "translate",
+            "paste_key", "input_device", "silence_secs", "max_secs",
+            "wake", "wake_model", "wake_threshold", "read_language",
+        )
+        if (value := getattr(args, name, None)) is not None
+    }
+    return replace(cfg, **overrides)
 
 
 def _run_once(cfg: config.Config, args: argparse.Namespace) -> int:
@@ -124,10 +130,12 @@ def _run_once(cfg: config.Config, args: argparse.Namespace) -> int:
 
     result = stt.transcribe(
         samples,
-        model=cfg.model,
+        motor=cfg.stt_motor,
+        model=cfg.active_model,
         device=cfg.device,
         compute_type=cfg.compute_type,
         language=cfg.language,
+        translate=cfg.translate,
         initial_prompt=cfg.initial_prompt,
         beam_size=cfg.beam_size,
     )
@@ -152,7 +160,15 @@ def _run_once(cfg: config.Config, args: argparse.Namespace) -> int:
         targets = cfg.targets
 
     if targets:
-        output.deliver(final, targets, paste_key=cfg.paste_key)
+        delivered = output.deliver(final, targets, paste_key=cfg.paste_key)
+        history.record(
+            final,
+            delivered=delivered,
+            language=result.language,
+            motor=cfg.stt_motor,
+            audio_seconds=result.duration,
+            stt_seconds=result.elapsed,
+        )
 
     if verbose:
         speed = result.duration / result.elapsed if result.elapsed else 0
@@ -266,8 +282,8 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.download:
         cfg = _merge(config.load(), args)
-        print(f"transcrição · {cfg.model}", file=sys.stderr)
-        stt.download(cfg.model)
+        print(f"transcrição · {cfg.active_model}", file=sys.stderr)
+        stt.download(cfg.active_model, motor=cfg.stt_motor)
         if cfg.wake:
             print(f"palavra-chave · {cfg.wake_model}", file=sys.stderr)
             try:
@@ -367,8 +383,10 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.warmup or args.loop:
         if not args.quiet:
-            print(f"carregando {cfg.model}…", file=sys.stderr)
-        stt.warmup(cfg.model, cfg.device, cfg.compute_type)
+            print(f"carregando {cfg.active_model}…", file=sys.stderr)
+        stt.warmup(
+            cfg.active_model, cfg.device, cfg.compute_type, motor=cfg.stt_motor
+        )
         if args.warmup:
             return 0
 
