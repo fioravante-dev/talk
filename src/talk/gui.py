@@ -115,6 +115,9 @@ _PETROL = "#6fa7bb"
 _DEEP = "#35687b"
 _LISTEN = "#8cc0a5"
 _HALT = "#d6a35c"
+# Recording is the one state that must be seen from across the desk: the
+# universal "on air" red, used for nothing else.
+_REC = "#e5605a"
 
 # Chrome in the system's own sans, so the window sits in Pop!_OS like a native
 # tool; the spoken words in a book face (P052, a Palatino), because what you
@@ -284,6 +287,8 @@ def _state_lines(state: dict | None) -> list[str]:
         return ["daemon stopped"]
     if state.get("recording"):
         head = "daemon recording"
+    elif state.get("transcribing"):
+        head = "daemon transcribing"
     elif state.get("reading"):
         head = "daemon reading aloud"
     else:
@@ -298,11 +303,33 @@ def _state_lines(state: dict | None) -> list[str]:
 # The daemon's vocabulary is the daemon's: a user reads whether the machine is
 # listening to them, and the hue says it before the word is read.
 _STATE_WORDS = {
-    "daemon recording": ("listening", _LISTEN),
+    "daemon recording": ("recording", _REC),
+    "daemon transcribing": ("transcribing", _LISTEN),
     "daemon reading aloud": ("reading aloud", _LISTEN),
     "daemon ready": ("ready", _PETROL),
     "daemon stopped": ("not running", _HALT),
 }
+
+
+def _clock(seconds) -> str:
+    """Elapsed time as a stopwatch reads it: 0:07, 1:32."""
+    try:
+        whole = max(0, int(float(seconds)))
+    except (TypeError, ValueError):
+        return ""
+    return f"{whole // 60}:{whole % 60:02d}"
+
+
+def _state_words(state: dict | None) -> tuple[str, str, bool]:
+    """What the header and the tray say right now: the words, their hue, and
+    whether it is recording. A recording carries its stopwatch, because "how
+    long has this been listening" is the question a red light raises."""
+    head, *_rest = _state_lines(state)
+    words, color = _STATE_WORDS.get(head, (head, _QUIET))
+    recording = head == "daemon recording"
+    if recording and state and "recording_secs" in state:
+        words = f"{words} {_clock(state['recording_secs'])}"
+    return words, color, recording
 
 
 def _language_label(value: str) -> str:
@@ -816,11 +843,16 @@ class Panel:
             self.cards.addWidget(self._entry(entry))
         self.cards.addStretch(1)
 
+    def poll_state(self) -> None:
+        from . import daemon
+
+        self.state = daemon.ping()
+
     def poll(self) -> None:
-        """Re-reads the daemon and the history; rebuilds the list only when a
-        phrase arrived, so a scroll position or an open details line survives."""
+        """Re-reads the history; rebuilds the list only when a phrase arrived,
+        so a scroll position or an open details line survives."""
         before = [entry.get("at") for entry in self.entries], len(self.entries)
-        self._refresh()
+        self.entries = history.recent(limit=self.LIMIT)
         if ([entry.get("at") for entry in self.entries], len(self.entries)) != before:
             self._fill()
             self.scroll.verticalScrollBar().setValue(0)
@@ -830,7 +862,8 @@ class Window:
     """One window: a header that says whether the machine is listening, then
     the phrases and the settings as two tabs."""
 
-    POLL_MS = 1500
+    POLL_MS = 400
+    HISTORY_EVERY = 4
 
     def __init__(self):
         self.QtWidgets = _qt()
@@ -873,6 +906,7 @@ class Window:
         self.tray = Tray(self) if Qw.QSystemTrayIcon.isSystemTrayAvailable() else None
         self.app.setQuitOnLastWindowClosed(self.tray is None)
 
+        self.ticks = 0
         self.timer = QtCore.QTimer(self.window)
         self.timer.timeout.connect(self._tick)
         self.timer.start(self.POLL_MS)
@@ -914,19 +948,27 @@ class Window:
 
     def _show_state(self) -> None:
         head, *rest = _state_lines(self.panel.state)
-        words, color = _STATE_WORDS.get(head, (head, _QUIET))
+        words, color, recording = _state_words(self.panel.state)
         self.state.setToolTip("\n".join(rest))
-        if self._shown == (words, color):
-            return
-        self._shown = (words, color)
-        self.glyph.setPixmap(_svg_icon(_tray_svg(color), sizes=(34, 68)).pixmap(34, 34))
-        self.state.setStyleSheet(f"color: {color}; font-size: 14px; font-weight: 600; padding-top: 8px;")
         self.state.setText(words.capitalize())
+        if self._shown == (head, color):
+            return
+        self._shown = (head, color)
+        self.glyph.setPixmap(
+            _svg_icon(_tray_svg(color, recording=recording), sizes=(34, 68)).pixmap(34, 34)
+        )
+        self.state.setStyleSheet(f"color: {color}; font-size: 14px; font-weight: 600; padding-top: 8px;")
 
     def _tick(self) -> None:
-        self.panel.poll()
+        # The state is asked every tick, so a recording shows within half a
+        # second of the key; the history and the file only every few ticks,
+        # because a phrase lands once per dictation, not once per beat.
+        self.ticks += 1
+        self.panel.poll_state()
+        if self.ticks % self.HISTORY_EVERY == 0:
+            self.panel.poll()
+            self.engine.setText(_summary(_current(_read_config_text())))
         self._show_state()
-        self.engine.setText(_summary(_current(_read_config_text())))
         if self.tray is not None:
             self.tray.show_state(self.panel.state, self.panel.entries)
 
@@ -965,9 +1007,20 @@ _BUBBLE = (
 )
 
 
-def _tray_svg(color: str) -> str:
+def _tray_svg(color: str, *, recording: bool = False, dim: bool = False) -> str:
     """The panel glyph: light ink like COSMIC's own symbolic icons, and the
-    state as a dot in the hue the window's pill uses, so they never disagree."""
+    state as a dot in the hue the window's header uses, so they never disagree.
+
+    Recording is not a dot: a dot is easy to miss, and a dictation nobody
+    noticed starting is a dictation that records the room. The whole bubble
+    turns red instead, and the tray pulses it between full and dim.
+    """
+    if recording:
+        return (
+            '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">'
+            f'<path fill="{_REC}" fill-opacity="{0.45 if dim else 1}" '
+            f'fill-rule="evenodd" d="{_BUBBLE}"/></svg>'
+        )
     return (
         '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">'
         f'<path fill="{_PAPER}" fill-rule="evenodd" d="{_BUBBLE}"/>'
@@ -1009,8 +1062,8 @@ def _svg_icon(svg: str, sizes=(16, 22, 24, 32, 48, 64, 128)):
     return icon
 
 
-def _tray_icon(color: str):
-    return _svg_icon(_tray_svg(color))
+def _tray_icon(color: str, *, recording: bool = False, dim: bool = False):
+    return _svg_icon(_tray_svg(color, recording=recording, dim=dim))
 
 
 class Tray:
@@ -1027,6 +1080,9 @@ class Tray:
         self.status = menu.addAction("")
         self.status.setEnabled(False)
         menu.addSeparator()
+        # One item that is always the next thing to do: start when idle, stop
+        # while recording - the same toggle the keyboard shortcut is.
+        self.action = menu.addAction("Start dictation", self._toggle_dictation)
         menu.addAction("Open talk", window.raise_)
         self.last = menu.addAction("Copy last dictation", self._copy_last)
         menu.addSeparator()
@@ -1035,20 +1091,57 @@ class Tray:
         self.menu = menu
         self.icon.setContextMenu(menu)
 
-        self._shown: tuple | None = None
+        from PySide6 import QtCore
+
+        self._frames = (_tray_icon(_REC, recording=True),
+                        _tray_icon(_REC, recording=True, dim=True))
+        self._dim = False
+        self.pulse = QtCore.QTimer(self.icon)
+        self.pulse.setInterval(600)
+        self.pulse.timeout.connect(self._beat)
+        self._shown: str | None = None
         self.show_state(window.panel.state, window.panel.entries)
         self.icon.show()
 
     def show_state(self, state: dict | None, entries: list[dict]) -> None:
-        head, *_rest = _state_lines(state)
-        words, color = _STATE_WORDS.get(head, (head, _QUIET))
+        words, color, recording = _state_words(state)
         self.last.setEnabled(bool(entries))
-        if self._shown == (words, color):
-            return  # repainting the icon every tick makes some panels flicker
-        self._shown = (words, color)
-        self.icon.setIcon(_tray_icon(color))
+        # The words change every second while recording (the stopwatch); the
+        # icon only when the state does - repainting it every tick makes some
+        # panels flicker.
         self.icon.setToolTip(f"talk: {words}")
-        self.status.setText(f"talk is {words}")
+        self.status.setText(words.capitalize())
+        self.action.setText("Stop recording" if recording else "Start dictation")
+        self.action.setEnabled(state is not None and (recording or not state.get("transcribing")))
+        if recording:
+            if not self.pulse.isActive():
+                self._dim = False
+                self.icon.setIcon(_tray_icon(color, recording=True))
+                self.pulse.start()
+            self._shown = None
+            return
+        self.pulse.stop()
+        if self._shown == color:
+            return
+        self._shown = color
+        self.icon.setIcon(_tray_icon(color))
+
+    def _beat(self) -> None:
+        """One pulse of the recording light: full red, then dim, then full."""
+        self._dim = not self._dim
+        self.icon.setIcon(self._frames[self._dim])
+
+    def _toggle_dictation(self) -> None:
+        """Asks the daemon, off the GUI thread: a dictation request only
+        answers when the text is delivered, and the icon must keep pulsing
+        meanwhile. The daemon's own config says where the text goes."""
+        import threading
+
+        from . import daemon
+
+        state = self.window.panel.state or {}
+        req = {"cmd": "stop"} if state.get("recording") else {"cmd": "dictate"}
+        threading.Thread(target=daemon.request, args=(req,), daemon=True).start()
 
     def _copy_last(self) -> None:
         if self.window.panel.entries:

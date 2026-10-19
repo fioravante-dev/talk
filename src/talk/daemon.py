@@ -104,6 +104,8 @@ class Daemon:
     def __init__(self, cfg: config.Config):
         self.cfg = cfg
         self.recording = threading.Event()  # há uma gravação em andamento
+        self.gravando_desde = 0.0  # monotonic do início, para o cronômetro da GUI
+        self.transcrevendo = threading.Event()  # o áudio já existe, o texto ainda não
         self.stop_recording = threading.Event()
         self.lock = threading.Lock()
         self.last_used = time.monotonic()
@@ -205,6 +207,7 @@ class Daemon:
         label = (cfg.language or "auto").upper()
         if anunciar_abertura:
             notify("⏳ Abrindo o microfone…", tag="talk-live")
+        self.gravando_desde = time.monotonic()
         self.recording.set()
         try:
             if aquecer:
@@ -240,17 +243,21 @@ class Daemon:
             notify("✍ Transcrevendo…", f"{rec.seconds:.0f}s")
         else:
             notify("✍ Carregando o modelo…", f"{rec.seconds:.0f}s de áudio guardados")
-        result = stt.transcribe(  # a partir daqui, o áudio já está salvo
-            rec.audio,
-            motor=cfg.stt_motor,
-            model=cfg.active_model,
-            device=cfg.device,
-            compute_type=cfg.compute_type,
-            language=cfg.language,
-            translate=cfg.translate,
-            initial_prompt=cfg.initial_prompt,
-            beam_size=cfg.beam_size,
-        )
+        self.transcrevendo.set()
+        try:
+            result = stt.transcribe(  # a partir daqui, o áudio já está salvo
+                rec.audio,
+                motor=cfg.stt_motor,
+                model=cfg.active_model,
+                device=cfg.device,
+                compute_type=cfg.compute_type,
+                language=cfg.language,
+                translate=cfg.translate,
+                initial_prompt=cfg.initial_prompt,
+                beam_size=cfg.beam_size,
+            )
+        finally:
+            self.transcrevendo.clear()
         if not result.text:
             notify("⃠ Nenhuma fala reconhecida", _kept(rec))
             return {"status": "empty", "recording": str(rec.path or "")}
@@ -532,7 +539,12 @@ class Daemon:
             return {"status": "ok", "recording": self.recording.is_set(),
                     "code": self.code, "wake": self.wake_on.is_set(),
                     "wake_model": self.cfg.wake_model if self.cfg.wake else "",
-                    "reading": self.lendo.is_set()}
+                    "reading": self.lendo.is_set(),
+                    # Campos que a GUI lê para dizer o que está acontecendo
+                    # agora; um daemon antigo sem eles só deixa a GUI mais muda.
+                    "transcribing": self.transcrevendo.is_set(),
+                    "recording_secs": (time.monotonic() - self.gravando_desde
+                                       if self.recording.is_set() else 0.0)}
         if cmd == "stop":
             # Um só comando para as duas coisas: no momento em que você quer
             # parar algo, não é hora de lembrar qual comando era.
