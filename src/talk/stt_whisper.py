@@ -9,6 +9,7 @@ hooks and the dispatcher in stt.py stays engine-agnostic.
 from __future__ import annotations
 
 import gc
+import os
 import re
 import sys
 import threading
@@ -53,7 +54,25 @@ def _load(model: str, device: str, compute_type: str):
     cuda.preload()
     from faster_whisper import WhisperModel
 
-    return WhisperModel(model, device=device, compute_type=compute_type)
+    return WhisperModel(_local(model), device=device, compute_type=compute_type)
+
+
+def _local(model: str) -> str:
+    """O caminho do modelo no cache, sem rede, quando ele já foi baixado.
+
+    Dado só o nome, o WhisperModel pergunta ao Hugging Face se há versão nova a
+    cada carga — e o modelo recarrega depois de todo período ocioso. Uma conexão
+    que trava sem resposta (já aconteceu) prende a ditada em "transcribing" sem
+    prazo. A rede fica só para quando o modelo ainda não está no disco.
+    """
+    if os.path.isdir(model):
+        return model
+    from faster_whisper.utils import download_model
+
+    try:
+        return download_model(model, local_files_only=True)
+    except Exception:
+        return model
 
 
 _carregando = threading.Lock()

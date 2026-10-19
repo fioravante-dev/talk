@@ -132,7 +132,7 @@ def _load(model: str, device: str, compute_type: str):
     Qwen3ASRModel = _packages()
 
     return Qwen3ASRModel.from_pretrained(
-        model,
+        _local(model),
         dtype=_dtype(compute_type),
         device_map=None if device == "cpu" else device,
         max_inference_batch_size=1,
@@ -140,6 +140,23 @@ def _load(model: str, device: str, compute_type: str):
         # Comfortável e o costuma caparra a runaway generation.
         max_new_tokens=256,
     )
+
+
+def _local(model: str) -> str:
+    """O caminho do modelo no cache, sem rede, quando ele já foi baixado.
+
+    Pelo nome, o from_pretrained consulta o Hugging Face a cada carga (e espera
+    o timeout quando a rede falha); uma conexão travada prende a ditada sem
+    prazo. Mesma regra do stt_whisper: rede só se o modelo não está no disco.
+    """
+    if os.path.isdir(model):
+        return model
+    from huggingface_hub import snapshot_download
+
+    try:
+        return snapshot_download(model, local_files_only=True)
+    except Exception:
+        return model
 
 
 def obter(model: str, device: str, compute_type: str):
