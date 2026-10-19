@@ -29,7 +29,7 @@ import tomllib
 from dataclasses import fields as dataclass_fields
 from pathlib import Path
 
-from . import config, history
+from . import config, history, shortcuts
 
 GUI_PATH = config.CONFIG_PATH
 
@@ -590,6 +590,7 @@ class Configurator:
             grid.addWidget(words, row, 0)
             grid.addWidget(combo, row, 1)
             row += 1
+        self._shortcut_rows(grid, row)
         outer.addLayout(grid)
         outer.addStretch(1)
 
@@ -613,26 +614,97 @@ class Configurator:
             translate.setCurrentIndex(0)
         translate.setEnabled(not qwen)
 
+    def _shortcut_rows(self, grid, row: int) -> None:
+        """One dropdown per dictation shortcut: the language that key hears.
+
+        The language a shortcut pins outranks config.toml, so leaving it out
+        of this window is how English speech kept coming back in Portuguese.
+        A binding whose command the CLI rejects says so in the warning hue,
+        because that key does nothing at all when pressed.
+        """
+        Qw = self.QtWidgets
+        self.shortcut_text = shortcuts.read()
+        self.shortcuts: list[tuple] = []
+        found = shortcuts.parse(self.shortcut_text)
+        if not found:
+            return
+        grid.setRowMinimumHeight(row, 14)
+        grid.addWidget(_label(Qw, "Keyboard shortcuts",
+                              f"color: {_PAPER}; font-size: 15px; font-weight: 600;"), row + 1, 0, 1, 2)
+        row += 2
+        for shortcut in found:
+            words = Qw.QWidget()
+            stack = Qw.QVBoxLayout(words)
+            stack.setContentsMargins(0, 0, 0, 0)
+            stack.setSpacing(2)
+            stack.addWidget(_label(Qw, shortcut.keys, f"color: {_PAPER};"))
+            if shortcut.broken:
+                note = _label(Qw, f"This key fails: talk no longer accepts {shortcut.broken}.",
+                              f"color: {_HALT}; font-size: 12px;")
+            else:
+                note = _quiet(Qw, "The language this key listens for.")
+            note.setWordWrap(True)
+            stack.addWidget(note)
+
+            today = {"language": shortcut.language}
+            items = _options("language", today)
+            combo = Qw.QComboBox()
+            combo.setFixedWidth(250)
+            combo.addItems([item[0] for item in items])
+            combo.setCurrentIndex(_index(items, today))
+            combo.currentIndexChanged.connect(self._changed)
+            self.shortcuts.append((combo, items, combo.currentIndex()))
+            grid.addWidget(words, row, 0)
+            grid.addWidget(combo, row, 1)
+            row += 1
+
+    def _shortcuts_dirty(self) -> bool:
+        return any(combo.currentIndex() != start for combo, _items, start in getattr(self, "shortcuts", []))
+
     def _changed(self) -> None:
         self._guard()
-        dirty = _patch(self.text, self._typed()) != self.text
+        dirty = _patch(self.text, self._typed()) != self.text or self._shortcuts_dirty()
         self.button.setEnabled(dirty)
         self.saved.setText("You have unsaved changes." if dirty else "")
 
+    def save_shortcuts(self) -> bool:
+        """Writes the shortcuts' languages back into COSMIC's file, one binding
+        at a time; returns whether anything changed. Each edit shifts the
+        offsets after it, so the file is parsed again before the next one."""
+        if not self._shortcuts_dirty():
+            return False
+        text = shortcuts.read()
+        for position, (combo, items, _start) in enumerate(self.shortcuts):
+            language = items[combo.currentIndex()][1]["language"]
+            found = shortcuts.parse(text)
+            if position < len(found):
+                text = shortcuts.set_language(text, found[position], language)
+        shortcuts.save(text)
+        self.shortcuts = [(c, i, c.currentIndex()) for c, i, _s in self.shortcuts]
+        return True
+
     def _save(self) -> None:
-        """The button's press: the window goes back over the file, and says where."""
+        """The button's press: the window goes back over the files, and says
+        what is already live and what still waits for a restart."""
+        config_dirty = _patch(self.text, self._typed()) != self.text
         try:
-            where = self.save()
+            keys = self.save_shortcuts()
+            where = self.save() if config_dirty else None
         except OSError as exc:
             # The words say what happened and what is still true: a silent
             # failure would leave someone convinced the knobs took effect.
             self.saved.setText(f"Could not write the file: {exc}. It stays as it is.")
             return
-        # The daemon reads the file once, at start: saying "saved" alone would
-        # promise a change the running dictation does not see yet.
         self.text = _read_config_text()
         self.button.setEnabled(False)
-        self.saved.setText(f"Saved to {_home(where)}. Restart the daemon to apply it.")
+        said = []
+        if keys:
+            said.append("Shortcuts saved; the next press uses them.")
+        if where:
+            # The daemon reads the file once, at start: saying "saved" alone
+            # would promise a change the running dictation does not see yet.
+            said.append(f"Settings saved to {_home(where)}. Restart the daemon to apply them.")
+        self.saved.setText(" ".join(said))
 
     def _typed(self) -> dict:
         """The dropdown selections, expanded to the config keys each one writes."""
