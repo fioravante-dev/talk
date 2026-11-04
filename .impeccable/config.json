@@ -1,0 +1,44 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "cream-palette",
+        "value": "*",
+        "files": [
+          ".impeccable/mocks/decision/a.html"
+        ],
+        "createdAt": "2026-11-04T11:24:20.440Z",
+        "reason": "agent decided: spent decision sketch kept as critique reference; the shipped app.css already moved to neutral #e1e2e0 after this same finding"
+      },
+      {
+        "rule": "design-system-font",
+        "value": "*",
+        "files": [
+          ".impeccable/mocks/decision/a.html"
+        ],
+        "createdAt": "2026-11-04T11:28:10.829Z",
+        "reason": "agent decided: spent decision sketch from the direction round, kept only as critique reference; not shipped"
+      },
+      {
+        "rule": "design-system-font",
+        "value": "*",
+        "files": [
+          ".impeccable/mocks/decision/b.html"
+        ],
+        "createdAt": "2026-11-04T11:28:10.833Z",
+        "reason": "agent decided: spent decision sketch from the direction round, kept only as critique reference; not shipped"
+      },
+      {
+        "rule": "design-system-font",
+        "value": "grotesk\",sans-serif",
+        "files": [
+          "talk-rs/crates/talk-ui/templates/base.html"
+        ],
+        "createdAt": "2026-11-04T11:28:10.841Z",
+        "reason": "agent decided: fragment of the stack \"Schibsted Grotesk\", sans-serif, which DESIGN.md documents as the only face; parser split the quoted family name"
+      }
+    ]
+  }
+}

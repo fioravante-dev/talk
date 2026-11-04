@@ -1,0 +1,21 @@
+[package]
+name = "talk-pill"
+description = "A pílula de gravação: layer-shell no canto da tela, sem foco, só enquanto o talk grava."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "talk-pill"
+path = "src/main.rs"
+
+[dependencies]
+cairo-rs = { version = "0.18", features = ["png"] }
+gtk = "0.18"
+gtk-layer-shell = { version = "0.8", features = ["v0_6"] }
+serde_json = "1"
+talk-core = { path = "../talk-core" }

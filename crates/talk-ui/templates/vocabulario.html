@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block main %}
+<div class="cols vocab">
+  <div class="col">
+    <section aria-labelledby="h-novo">
+      <h2 id="h-novo">ensinar uma palavra</h2>
+      <form class="add" hx-post="/vocabulario/adicionar">
+        <label for="termo">Como deve sair escrito</label>
+        <input id="termo" name="termo" required placeholder="Pop!_OS" autocomplete="off" value="{{ draft }}">
+        <label for="erros">Como o Whisper costuma errar <small>opcional, separado por vírgula</small></label>
+        <input id="erros" name="erros" placeholder="PopiOS, Pop OS" autocomplete="off">
+        <p class="note">Os erros viram o termo depois da transcrição. Só ponha grafias que nunca são palavras de verdade: “Cloud” → “Claude” estragaria quando você falar de cloud.</p>
+        <button type="submit">Adicionar</button>
+      </form>
+      {% if !error.is_empty() %}<p class="error" role="alert">{{ error }}</p>{% endif %}
+    </section>
+    {% if !suggestions.is_empty() %}
+    <section aria-labelledby="h-sug">
+      <h2 id="h-sug">aparecem muito no histórico</h2>
+      <div class="chips">
+        {% for s in suggestions %}
+        <form hx-post="/vocabulario/adicionar"><input type="hidden" name="termo" value="{{ s.word }}"><button type="submit">{{ s.word }} <small>{{ s.count }}×</small></button></form>
+        {% endfor %}
+      </div>
+    </section>
+    {% endif %}
+  </div>
+  <div class="col">
+    <section aria-labelledby="h-dica">
+      <h2 id="h-dica">dica para o Whisper</h2>
+      <div class="budget{% if over %} over{% endif %}">
+        <div class="budget-bar"><i style="width: {{ budget_pct }}%"></i></div>
+        <div class="row"><span class="k">≈ {{ tokens }} de {{ limit }} tokens</span><span class="v">{% if over %}o começo está sendo cortado{% else %}sobram {{ limit - tokens }}{% endif %}</span></div>
+      </div>
+      <p class="note">O Whisper guarda só o fim da dica, então as suas palavras vão por último e são as últimas a sair.</p>
+    </section>
+    <section aria-labelledby="h-termos">
+      <h2 id="h-termos">suas palavras <span class="count">{{ entries.len() }}</span></h2>
+      {% if entries.is_empty() %}<p class="empty">Nenhuma ainda. As que você ensinar aparecem aqui.</p>{% endif %}
+      <ul class="terms">
+        {% for e in entries %}
+        <li class="row">
+          <span class="k"><b>{{ e.term }}</b>{% if !e.errors.is_empty() %}<span class="errs"> ← {{ e.errors.join(", ") }}</span>{% endif %}</span>
+          <form hx-post="/vocabulario/remover"><input type="hidden" name="termo" value="{{ e.term }}"><button class="quiet" type="submit" aria-label="Remover {{ e.term }}">remover</button></form>
+        </li>
+        {% endfor %}
+      </ul>
+      {% if !generic.is_empty() %}
+      <details class="generic">
+        <summary>{{ generic.len() }} termos genéricos do config.toml</summary>
+        <p>{{ generic.join(", ") }}</p>
+      </details>
+      {% endif %}
+    </section>
+  </div>
+</div>
+{% endblock %}

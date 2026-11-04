@@ -1,0 +1,22 @@
+[package]
+name = "talk-core"
+description = "O que o talk decide sem tocar no mundo: config, vocabulário, histórico, o fio do trabalhador."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow = "1"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+regex = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "1"
+toml_edit = "0.25"
+
+[dev-dependencies]
+tempfile = "3"

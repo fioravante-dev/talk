@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+{% block main %}
+<div class="cols">
+  <div class="col">
+    <section aria-labelledby="h-atalhos">
+      <h2 id="h-atalhos">atalhos</h2>
+      {% if shortcuts.is_empty() %}
+      <p class="empty">Nenhum atalho do talk no COSMIC. Cadastre em Configurações → Teclado → Atalhos personalizados, com o comando <code>talk-rs toggle</code>.</p>
+      {% endif %}
+      {% for s in shortcuts %}
+      <div class="row shortcut">
+        <span class="k">{{ s.label }}</span>
+        <span class="keys">{% for k in s.keys %}<kbd>{{ k }}</kbd>{% endfor %}</span>
+      </div>
+      {% if let Some(desc) = s.description %}
+      <form class="seg seg-sm" hx-post="/ajustes/idioma" hx-trigger="change" aria-label="Idioma do atalho {{ s.combo }}">
+        <input type="hidden" name="atalho" value="{{ desc }}">
+        {% for (value, label) in languages %}
+        <label><input type="radio" name="valor" value="{{ value }}" {% if s.language == *value %}checked{% endif %}><span>{{ label }}</span></label>
+        {% endfor %}
+      </form>
+      {% endif %}
+      {% endfor %}
+      <p class="note">O COSMIC aplica a troca no próximo aperto.</p>
+    </section>
+    <section aria-labelledby="h-colar">
+      <h2 id="h-colar">colar com</h2>
+      <form class="seg" hx-post="/ajustes/colar" hx-trigger="change">
+        <label><input type="radio" name="valor" value="ctrl+v" {% if paste_key == "ctrl+v" %}checked{% endif %}><span>Ctrl+V<small>a maioria dos apps</small></span></label>
+        <label><input type="radio" name="valor" value="ctrl+shift+v" {% if paste_key == "ctrl+shift+v" %}checked{% endif %}><span>Ctrl+Shift+V<small>terminais</small></span></label>
+      </form>
+    </section>
+  </div>
+  <div class="col">
+    <section aria-labelledby="h-modelo">
+      <h2 id="h-modelo">modelo</h2>
+      <form class="seg" hx-post="/ajustes/modelo" hx-trigger="change">
+        {% for m in models %}
+        <label><input type="radio" name="valor" value="{{ m.file }}" {% if m.chosen %}checked{% endif %} {% if !m.present %}disabled{% endif %}><span>{{ m.name }}<small>{{ m.note }}</small></span></label>
+        {% endfor %}
+      </form>
+      <p class="note">Vale a partir da próxima ditada.</p>
+    </section>
+    <section aria-labelledby="h-carregado">
+      <h2 id="h-carregado">fica carregado depois da última ditada</h2>
+      <form class="scale" hx-post="/ajustes/carregado" hx-trigger="change" style="--at: {{ keep_index }}">
+        <div class="ticks" aria-hidden="true"></div>
+        <div class="needle" aria-hidden="true"></div>
+        <div class="stops">
+          {% for (value, label) in keep_options %}
+          <label style="--i: {{ loop.index0 }}"><input type="radio" name="valor" value="{{ value }}" {% if keep_alive == *value %}checked{% endif %}><span>{{ label }}</span></label>
+          {% endfor %}
+        </div>
+      </form>
+      <p class="note">{{ keep_note }}</p>
+    </section>
+    <section aria-labelledby="h-mic">
+      <h2 id="h-mic">microfone</h2>
+      <form hx-post="/ajustes/microfone" hx-trigger="change">
+        <label class="sr" for="mic">Microfone</label>
+        <select id="mic" name="valor">
+          {% for m in mics %}
+          <option value="{{ m.name }}" {% if m.chosen %}selected{% endif %}>{{ m.label }}</option>
+          {% endfor %}
+        </select>
+      </form>
+      <div class="meter" data-meter aria-hidden="true">{% for _ in 0..16 %}<i></i>{% endfor %}</div>
+      <p class="note">O medidor mexe enquanto você dita.</p>
+    </section>
+  </div>
+</div>
+{% endblock %}

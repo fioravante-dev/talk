@@ -1,0 +1,25 @@
+[package]
+name = "talk"
+description = "O serviço de ditado: atalho, microfone, Whisper na GPU, texto no cursor."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "talk-rs"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+evdev = "0.13"
+nix = { version = "0.30", features = ["signal"] }
+ksni = { version = "0.3", features = ["blocking"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+talk-core = { path = "../talk-core" }
+whisper-rs = { version = "0.16", features = ["cuda"] }

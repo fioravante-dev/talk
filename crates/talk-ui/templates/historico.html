@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block main %}
+<div class="history">
+  <form class="search" role="search" hx-get="/historico" hx-trigger="input changed delay:200ms from:find input, submit">
+    <label class="sr" for="q">Buscar no histórico</label>
+    <input id="q" type="search" name="q" value="{{ query }}" placeholder="buscar nas ditadas" autocomplete="off">
+    <span class="count">{{ total }} ditadas{% if !query.is_empty() %} com “{{ query }}”{% endif %}</span>
+  </form>
+  <div class="scale-head" aria-hidden="true"><span>fala</span><span class="scale-legend">a barra cheia = {{ scale_label }}</span></div>
+  {% if days.is_empty() %}
+  <p class="empty">{% if query.is_empty() %}Nenhuma ditada ainda. Aperte Super+D, fale e aperte de novo.{% else %}Nada com “{{ query }}”.{% endif %}</p>
+  {% endif %}
+  {% for day in days %}
+  <section aria-label="{{ day.label }}">
+    <h2>{{ day.label }}</h2>
+    <ol class="entries">
+      {% for e in day.entries %}
+      <li class="entry{% if e.copied %} copied{% endif %}">
+        <time>{{ e.time }}</time>
+        <div class="dur" title="{{ e.audio }} de fala"><i style="width: {{ e.bar }}%"></i></div>
+        <p class="text">{{ e.text }}</p>
+        <span class="meta">{{ e.audio }} · {{ e.stt }}{% if !e.language.is_empty() %} · {{ e.language }}{% endif %}</span>
+        <form hx-post="/historico/copiar">
+          <input type="hidden" name="at" value="{{ e.at }}">
+          <input type="hidden" name="q" value="{{ query }}">
+          <button type="submit">{% if e.copied %}copiado{% else %}copiar{% endif %}</button>
+        </form>
+      </li>
+      {% endfor %}
+    </ol>
+  </section>
+  {% endfor %}
+</div>
+{% endblock %}

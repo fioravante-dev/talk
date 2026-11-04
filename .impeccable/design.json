@@ -1,0 +1,403 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-11-04T11:27:37+00:00",
+  "title": "Design System: talk",
+  "extensions": {
+    "colorMeta": {
+      "ground": {
+        "role": "neutral",
+        "displayName": "Alumínio",
+        "canonical": "oklch(91.1% 0.003 128)",
+        "tonalRamp": [
+          "#0b0b0b",
+          "#242423",
+          "#3f403e",
+          "#5d5e5c",
+          "#80807f",
+          "#a4a5a3",
+          "#cacbc9",
+          "#eeefee"
+        ]
+      },
+      "plate": {
+        "role": "neutral",
+        "displayName": "Chapa",
+        "canonical": "oklch(95.1% 0.003 128)",
+        "tonalRamp": [
+          "#0b0b0b",
+          "#242423",
+          "#3f403e",
+          "#5d5e5c",
+          "#80807f",
+          "#a4a5a3",
+          "#cacbc9",
+          "#eeefee"
+        ]
+      },
+      "well": {
+        "role": "neutral",
+        "displayName": "Poço",
+        "canonical": "oklch(87.7% 0.005 135)",
+        "tonalRamp": [
+          "#0b0b0a",
+          "#232422",
+          "#3f403e",
+          "#5c5e5c",
+          "#7f817e",
+          "#a3a5a2",
+          "#c9cbc8",
+          "#eeefed"
+        ]
+      },
+      "ink": {
+        "role": "primary",
+        "displayName": "Grafite",
+        "canonical": "oklch(28.4% 0.004 107)",
+        "tonalRamp": [
+          "#0b0b0a",
+          "#242422",
+          "#40403e",
+          "#5e5e5b",
+          "#80807e",
+          "#a5a5a2",
+          "#cbcbc8",
+          "#eeeeed"
+        ]
+      },
+      "ink-2": {
+        "role": "neutral",
+        "displayName": "Segunda Tinta",
+        "canonical": "oklch(47.6% 0.005 135)",
+        "tonalRamp": [
+          "#0b0b0a",
+          "#232522",
+          "#3e403e",
+          "#5c5e5b",
+          "#7f817e",
+          "#a3a5a2",
+          "#c9cbc8",
+          "#eeefed"
+        ]
+      },
+      "ink-3": {
+        "role": "neutral",
+        "displayName": "Terceira Tinta",
+        "canonical": "oklch(50.0% 0.005 135)",
+        "tonalRamp": [
+          "#0b0b0a",
+          "#232522",
+          "#3e403e",
+          "#5c5e5b",
+          "#7f817e",
+          "#a3a5a2",
+          "#c9cbc8",
+          "#eeefed"
+        ]
+      },
+      "line": {
+        "role": "neutral",
+        "displayName": "Filete",
+        "canonical": "oklch(82.1% 0.005 135)",
+        "tonalRamp": [
+          "#0b0b0a",
+          "#232522",
+          "#3f403e",
+          "#5c5e5c",
+          "#7f817e",
+          "#a3a5a2",
+          "#c9cbc8",
+          "#eeefed"
+        ]
+      },
+      "ink-inverse-2": {
+        "role": "neutral",
+        "displayName": "Segunda Tinta Invertida",
+        "canonical": "oklch(85.8% 0.005 135)",
+        "tonalRamp": [
+          "#0b0b0a",
+          "#232422",
+          "#3f403e",
+          "#5c5e5c",
+          "#7f817e",
+          "#a3a5a2",
+          "#c9cbc8",
+          "#eeefed"
+        ]
+      },
+      "lamp-green": {
+        "role": "secondary",
+        "displayName": "Luz Verde Braun",
+        "canonical": "oklch(58.3% 0.129 146)",
+        "tonalRamp": [
+          "#030f04",
+          "#002e07",
+          "#104d1c",
+          "#296e33",
+          "#469450",
+          "#75b77b",
+          "#a3dba7",
+          "#dff6e0"
+        ]
+      },
+      "signal-red": {
+        "role": "secondary",
+        "displayName": "Vermelho de Gravação",
+        "canonical": "oklch(59.6% 0.188 31)",
+        "tonalRamp": [
+          "#1b0301",
+          "#4f0000",
+          "#790e01",
+          "#a62917",
+          "#d94630",
+          "#f97862",
+          "#ffa792",
+          "#ffe1d7"
+        ]
+      },
+      "transcribe-amber": {
+        "role": "tertiary",
+        "displayName": "Âmbar de Transcrição",
+        "canonical": "oklch(68.0% 0.137 75)",
+        "tonalRamp": [
+          "#120901",
+          "#381d00",
+          "#5b3700",
+          "#805300",
+          "#ab7308",
+          "#d49737",
+          "#f6c074",
+          "#ffebcc"
+        ]
+      }
+    },
+    "typographyMeta": {
+      "mark": {
+        "displayName": "Marca",
+        "purpose": "Só a palavra talk, em minúsculas, no cabeçalho."
+      },
+      "body": {
+        "displayName": "Corpo",
+        "purpose": "Rótulos de linha, abas, texto das ditadas (até 75ch), campos."
+      },
+      "section-title": {
+        "displayName": "Título de seção",
+        "purpose": "Títulos de seção em minúsculas, segunda tinta."
+      },
+      "control": {
+        "displayName": "Controle",
+        "purpose": "Botões, opções segmentadas, valor na borda direita."
+      },
+      "note": {
+        "displayName": "Nota",
+        "purpose": "A consequência ao vivo sob cada controle, até 60ch."
+      },
+      "caption": {
+        "displayName": "Legenda",
+        "purpose": "Rodapé, metadados, contagens, rótulos da escala, apoio em segmentos."
+      },
+      "time": {
+        "displayName": "Hora",
+        "purpose": "Único lugar com algarismos tabulares: <time> no histórico."
+      }
+    },
+    "shadows": [
+      {
+        "name": "pill-resting",
+        "value": "0 2px 3px rgb(42 42 40 / .14)",
+        "purpose": "Aproximação CSS da sombra em três camadas (grafite .05/.07/.09, +2,5px em y) da pílula em cairo. Só na pílula."
+      },
+      {
+        "name": "lamp-inset",
+        "value": "inset 0 0 0 1px rgb(42 42 40 / .35)",
+        "purpose": "Anel embutido da luz indicadora."
+      },
+      {
+        "name": "field-focus",
+        "value": "0 0 0 1px #2a2a28",
+        "purpose": "Anel de 1px em grafite somado à borda do campo em foco."
+      }
+    ],
+    "motion": [
+      {
+        "name": "control-fill",
+        "value": "background .12s, color .12s",
+        "purpose": "Botões e segmentados enchendo de grafite."
+      },
+      {
+        "name": "tab-color",
+        "value": "color .15s",
+        "purpose": "Hover das abas e giro da seta do details."
+      },
+      {
+        "name": "needle-glide",
+        "value": "left .35s cubic-bezier(.2, .8, .2, 1)",
+        "purpose": "A agulha da escala de sintonia indo à parada escolhida."
+      },
+      {
+        "name": "meter-segment",
+        "value": "background .08s",
+        "purpose": "Segmentos do medidor acendendo."
+      },
+      {
+        "name": "recording-pulse",
+        "value": "opacity 1s ease-in-out infinite (50%: .45)",
+        "purpose": "Luz vermelha pulsando em gravando; a pílula pulsa entre .55 e 1. Desligado em prefers-reduced-motion."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "compact",
+        "value": "900px"
+      },
+      {
+        "name": "single-column",
+        "value": "640px"
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Botão",
+      "kind": "button",
+      "refersTo": "button",
+      "description": "Contorno grafite que enche no hover; a ação padrão (Adicionar, copiar).",
+      "html": "<button class=\"ds-btn\">Adicionar</button>",
+      "css": ":host{--ground:#e1e2e0;--plate:#eeefed;--well:#d5d7d4;--ink:#2a2a28;--ink2:#5b5d5a;--ink3:#626461;--line:#c3c5c2;--green:#3f8f4a;--red:#d8442e;--amber:#c98a1b;--focus:#2a2a28;--r:6px;font-family:'Schibsted Grotesk',sans-serif;color:var(--ink)} .ds-btn{font:500 13px 'Schibsted Grotesk',sans-serif;color:var(--ink);background:none;cursor:pointer;border:1px solid var(--ink);border-radius:var(--r);padding:6px 14px;transition:background .12s,color .12s}.ds-btn:hover{background:var(--ink);color:var(--plate)}.ds-btn:active{transform:translateY(1px)}.ds-btn:focus-visible{outline:2px solid var(--focus);outline-offset:2px}"
+    },
+    {
+      "name": "Botão discreto",
+      "kind": "button",
+      "refersTo": "button-quiet",
+      "description": "Sem contorno, segunda tinta; ações secundárias como remover.",
+      "html": "<button class=\"ds-btn-quiet\">remover</button>",
+      "css": ":host{--ground:#e1e2e0;--plate:#eeefed;--well:#d5d7d4;--ink:#2a2a28;--ink2:#5b5d5a;--ink3:#626461;--line:#c3c5c2;--green:#3f8f4a;--red:#d8442e;--amber:#c98a1b;--focus:#2a2a28;--r:6px;font-family:'Schibsted Grotesk',sans-serif;color:var(--ink)} .ds-btn-quiet{font:500 13px 'Schibsted Grotesk',sans-serif;color:var(--ink2);background:none;cursor:pointer;border:1px solid transparent;border-radius:var(--r);padding:4px 8px;transition:background .12s,color .12s}.ds-btn-quiet:hover{background:var(--well);color:var(--ink)}.ds-btn-quiet:focus-visible{outline:2px solid var(--focus);outline-offset:2px}"
+    },
+    {
+      "name": "Segmentado",
+      "kind": "custom",
+      "refersTo": "segmented-option",
+      "description": "Rádios em régua com contorno grafite; a opção escolhida fica preenchida.",
+      "html": "<div class=\"ds-seg\"><label><input type=\"radio\" name=\"ds-colar\" checked><span>Ctrl+V<small>a maioria dos apps</small></span></label><label><input type=\"radio\" name=\"ds-colar\"><span>Ctrl+Shift+V<small>terminais</small></span></label></div>",
+      "css": ":host{--ground:#e1e2e0;--plate:#eeefed;--well:#d5d7d4;--ink:#2a2a28;--ink2:#5b5d5a;--ink3:#626461;--line:#c3c5c2;--green:#3f8f4a;--red:#d8442e;--amber:#c98a1b;--focus:#2a2a28;--r:6px;font-family:'Schibsted Grotesk',sans-serif;color:var(--ink)} .ds-seg{display:flex;border:1px solid var(--ink);border-radius:var(--r);overflow:hidden;background:var(--ground)}.ds-seg label{flex:1;position:relative;cursor:pointer}.ds-seg label+label{border-left:1px solid var(--ink)}.ds-seg input{position:absolute;opacity:0;inset:0;margin:0;cursor:pointer}.ds-seg span{display:block;padding:9px 12px;font-size:13px;font-weight:500;transition:background .12s,color .12s}.ds-seg small{display:block;font-size:12px;font-weight:400;color:var(--ink2);margin-top:1px}.ds-seg label:hover span{background:var(--well)}.ds-seg input:checked+span{background:var(--ink);color:var(--plate)}.ds-seg input:checked+span small{color:#cfd1ce}.ds-seg input:focus-visible+span{outline:2px solid var(--focus);outline-offset:-4px;border-radius:4px}"
+    },
+    {
+      "name": "Campo de texto",
+      "kind": "input",
+      "refersTo": "input",
+      "description": "Chapa com filete; foco troca o filete por grafite com anel de 1px.",
+      "html": "<input class=\"ds-input\" placeholder=\"buscar nas ditadas\">",
+      "css": ":host{--ground:#e1e2e0;--plate:#eeefed;--well:#d5d7d4;--ink:#2a2a28;--ink2:#5b5d5a;--ink3:#626461;--line:#c3c5c2;--green:#3f8f4a;--red:#d8442e;--amber:#c98a1b;--focus:#2a2a28;--r:6px;font-family:'Schibsted Grotesk',sans-serif;color:var(--ink)} .ds-input{font:400 14px 'Schibsted Grotesk',sans-serif;color:var(--ink);width:100%;background:var(--plate);border:1px solid var(--line);border-radius:var(--r);padding:8px 12px}.ds-input::placeholder{color:var(--ink3)}.ds-input:hover{border-color:var(--ink2)}.ds-input:focus{border-color:var(--ink);outline:none;box-shadow:0 0 0 1px var(--ink)}"
+    },
+    {
+      "name": "Navegação",
+      "kind": "nav",
+      "refersTo": "header-bar",
+      "description": "Cabeçalho de 64px: marca, abas em minúsculas com sublinhado no ativo, luz de estado à direita.",
+      "html": "<header class=\"ds-bar\"><span class=\"ds-mark\">talk</span><nav class=\"ds-nav\"><a href=\"#\" class=\"on\">ajustes</a><a href=\"#\">histórico</a><a href=\"#\">vocabulário</a></nav><p class=\"ds-state\"><span class=\"ds-lamp\"></span>pronto · modelo na GPU</p></header>",
+      "css": ":host{--ground:#e1e2e0;--plate:#eeefed;--well:#d5d7d4;--ink:#2a2a28;--ink2:#5b5d5a;--ink3:#626461;--line:#c3c5c2;--green:#3f8f4a;--red:#d8442e;--amber:#c98a1b;--focus:#2a2a28;--r:6px;font-family:'Schibsted Grotesk',sans-serif;color:var(--ink)} .ds-bar{display:flex;align-items:stretch;gap:40px;height:64px;padding:0 32px;background:var(--plate);border-bottom:1px solid var(--line)}.ds-mark{align-self:center;font-weight:700;font-size:19px;letter-spacing:-.01em}.ds-nav{display:flex;gap:28px}.ds-nav a{display:flex;align-items:center;font-size:14px;color:var(--ink2);text-decoration:none;border-bottom:2px solid transparent;margin-bottom:-1px;transition:color .15s}.ds-nav a:hover{color:var(--ink)}.ds-nav a.on{color:var(--ink);border-color:var(--ink);font-weight:500}.ds-nav a:focus-visible{outline:2px solid var(--focus);outline-offset:2px}.ds-state{margin:0 0 0 auto;align-self:center;display:flex;align-items:center;gap:10px;font-size:13px;color:var(--ink2)}.ds-lamp{width:10px;height:10px;border-radius:50%;background:var(--green);box-shadow:inset 0 0 0 1px rgb(42 42 40/.35)}"
+    },
+    {
+      "name": "Teclas",
+      "kind": "custom",
+      "refersTo": "kbd",
+      "description": "Teclas de atalho com borda inferior dupla, na borda direita da linha.",
+      "html": "<div class=\"ds-row\"><span>Ditar em inglês</span><span class=\"ds-keys\"><kbd class=\"ds-kbd\">Super</kbd><kbd class=\"ds-kbd\">Alt</kbd><kbd class=\"ds-kbd\">D</kbd></span></div>",
+      "css": ":host{--ground:#e1e2e0;--plate:#eeefed;--well:#d5d7d4;--ink:#2a2a28;--ink2:#5b5d5a;--ink3:#626461;--line:#c3c5c2;--green:#3f8f4a;--red:#d8442e;--amber:#c98a1b;--focus:#2a2a28;--r:6px;font-family:'Schibsted Grotesk',sans-serif;color:var(--ink)} .ds-row{display:flex;align-items:baseline;justify-content:space-between;gap:16px;padding:7px 0;font-size:14px}.ds-keys{display:inline-flex;gap:4px}.ds-kbd{font:500 12px 'Schibsted Grotesk',sans-serif;padding:2px 7px;border:1px solid var(--line);border-bottom-width:2px;border-radius:4px;background:var(--plate)}"
+    },
+    {
+      "name": "Escala de sintonia",
+      "kind": "custom",
+      "refersTo": "segmented-option",
+      "description": "Controle funcional: rádios desenhados como mostrador, traços e agulha vermelha na parada escolhida.",
+      "html": "<div class=\"ds-scale\" style=\"--at:2\"><div class=\"ds-ticks\"></div><div class=\"ds-needle\"></div><div class=\"ds-stops\"><label style=\"--i:0\"><input type=\"radio\" name=\"ds-k\"><span>0</span></label><label style=\"--i:1\"><input type=\"radio\" name=\"ds-k\"><span>30 s</span></label><label style=\"--i:2\"><input type=\"radio\" name=\"ds-k\" checked><span>5 min</span></label><label style=\"--i:3\"><input type=\"radio\" name=\"ds-k\"><span>15 min</span></label><label style=\"--i:4\"><input type=\"radio\" name=\"ds-k\"><span>sempre</span></label></div></div>",
+      "css": ":host{--ground:#e1e2e0;--plate:#eeefed;--well:#d5d7d4;--ink:#2a2a28;--ink2:#5b5d5a;--ink3:#626461;--line:#c3c5c2;--green:#3f8f4a;--red:#d8442e;--amber:#c98a1b;--focus:#2a2a28;--r:6px;font-family:'Schibsted Grotesk',sans-serif;color:var(--ink)} .ds-scale{position:relative;padding:4px 8px 0;width:360px}.ds-ticks{height:30px;position:relative;background:repeating-linear-gradient(90deg,var(--ink) 0 1px,transparent 1px calc(25% - .25px)) 0 0/100% 30px no-repeat,repeating-linear-gradient(90deg,rgb(42 42 40/.45) 0 1px,transparent 1px calc(6.25% - .0625px)) 0 10px/100% 20px no-repeat}.ds-ticks::after{content:'';position:absolute;right:0;top:0;width:1px;height:30px;background:var(--ink)}.ds-needle{position:absolute;top:2px;left:calc(8px + var(--at)*(100% - 16px)/4);width:2px;height:40px;margin-left:-1px;background:var(--red);transition:left .35s cubic-bezier(.2,.8,.2,1)}.ds-stops{position:relative;height:22px;margin-top:6px}.ds-stops label{position:absolute;left:calc(var(--i)*25%);transform:translateX(-50%);cursor:pointer;white-space:nowrap}.ds-stops input{position:absolute;opacity:0;inset:0;margin:0;cursor:pointer}.ds-stops span{font-size:12px;color:var(--ink2);padding:2px 6px;border-radius:4px}.ds-stops label:hover span{color:var(--ink)}.ds-stops input:checked+span{color:var(--ink);font-weight:700}.ds-stops input:focus-visible+span{outline:2px solid var(--focus);outline-offset:1px}"
+    },
+    {
+      "name": "Medidor de segmentos",
+      "kind": "custom",
+      "refersTo": "",
+      "description": "Nível do microfone: segmentos apagados em filete, acesos em verde, os quentes em vermelho.",
+      "html": "<div class=\"ds-meter\"><i class=\"lit\"></i><i class=\"lit\"></i><i class=\"lit\"></i><i class=\"lit\"></i><i class=\"lit\"></i><i class=\"lit\"></i><i class=\"lit\"></i><i class=\"lit\"></i><i class=\"lit\"></i><i class=\"lit\"></i><i class=\"lit\"></i><i class=\"lit\"></i><i class=\"lit\"></i><i class=\"lit\"></i><i class=\"lit hot\"></i><i></i></div>",
+      "css": ":host{--ground:#e1e2e0;--plate:#eeefed;--well:#d5d7d4;--ink:#2a2a28;--ink2:#5b5d5a;--ink3:#626461;--line:#c3c5c2;--green:#3f8f4a;--red:#d8442e;--amber:#c98a1b;--focus:#2a2a28;--r:6px;font-family:'Schibsted Grotesk',sans-serif;color:var(--ink)} .ds-meter{display:flex;gap:3px;width:270px}.ds-meter i{flex:1;max-width:14px;height:8px;background:var(--line);border-radius:1px;transition:background .08s}.ds-meter i.lit{background:var(--green)}.ds-meter i.lit.hot{background:var(--red)}"
+    },
+    {
+      "name": "Pílula de gravação",
+      "kind": "custom",
+      "refersTo": "recording-pill",
+      "description": "Aproximação CSS da pílula desenhada em cairo: chapa, luz vermelha pulsando, cronômetro e medidor de 12 segmentos.",
+      "html": "<div class=\"ds-pill\"><span class=\"ds-pill-lamp\"></span><span class=\"ds-pill-label\">gravando 0:07</span><span class=\"ds-pill-meter\"><i class=\"lit\"></i><i class=\"lit\"></i><i class=\"lit\"></i><i class=\"lit\"></i><i class=\"lit\"></i><i class=\"lit\"></i><i class=\"lit\"></i><i></i><i></i><i></i><i></i><i></i></span></div>",
+      "css": ":host{--ground:#e1e2e0;--plate:#eeefed;--well:#d5d7d4;--ink:#2a2a28;--ink2:#5b5d5a;--ink3:#626461;--line:#c3c5c2;--green:#3f8f4a;--red:#d8442e;--amber:#c98a1b;--focus:#2a2a28;--r:6px;font-family:'Schibsted Grotesk',sans-serif;color:var(--ink)} .ds-pill{display:flex;align-items:center;width:244px;height:28px;padding:0 18px 0 13px;background:var(--plate);border:1px solid var(--line);border-radius:14px;box-shadow:0 2px 3px rgb(42 42 40/.14);font-size:12.5px;color:var(--ink)}.ds-pill-lamp{width:10px;height:10px;border-radius:50%;background:var(--red);margin-right:9px;animation:ds-pulse 1s ease-in-out infinite}.ds-pill-label{flex:1}.ds-pill-meter{display:flex;gap:2px}.ds-pill-meter i{width:5px;height:8px;background:var(--line)}.ds-pill-meter i.lit{background:var(--green)}@keyframes ds-pulse{50%{opacity:.55}}@media (prefers-reduced-motion:reduce){.ds-pill-lamp{animation:none}}"
+    }
+  ],
+  "narrative": {
+    "northStar": "O Aparelho Braun",
+    "overview": "A janela do talk é a face de um aparelho de áudio dos anos 60: uma chapa de alumínio claro, tinta grafite, filetes finos e uma luz indicadora. Cada ajuste é um rótulo com o valor travado na borda direita, e nada na tela existe que não seja controle, leitura ou consequência. A densidade é de painel de instrumento: muitas linhas curtas, separadas por filete, nenhuma caixa em volta de nada.\n\nA cor é quase toda neutra. O que tem cor é sinal: verde para pronto, vermelho para gravando, âmbar para transcrevendo. Os controles são mecânicos na aparência (segmentados de contorno grafite com o escolhido preenchido, teclas com a borda de baixo dupla, uma escala de sintonia com agulha) e todo controle mostra a consequência ao vivo, em texto, logo abaixo. A pílula de gravação, desenhada em cairo fora do webview, é a mesma chapa e a mesma fonte, reduzida a uma luz, um texto e um medidor.\n\nO sistema recusa o painel de ajustes padrão do Linux (cartões arredondados agrupados, o azul do sistema) e o dashboard escuro com neon. Toda a interface é em português, e os títulos de seção são em minúsculas.",
+    "keyCharacteristics": [
+      "Chapa neutra fria (o fundo saiu do quente para o neutro porque o quente lia como creme).",
+      "Uma tinta grafite faz tudo: texto, contorno, preenchimento do ativo, foco.",
+      "Cor só como sinal de estado, nunca como decoração ou marca.",
+      "Hierarquia por filetes de 1px e espaço, sem cartões nem sombras na janela.",
+      "Rótulo à esquerda, valor na borda direita, uma mensagem por linha.",
+      "Consequência ao vivo sob cada controle."
+    ],
+    "rules": [
+      {
+        "name": "The Lights Are Signals Rule",
+        "body": "Verde, vermelho e âmbar existem só para estado: pronto, gravando, transcrevendo. Nenhum deles vira cor de botão, link, destaque ou erro. Erros são grafite em peso 600.",
+        "section": "colors"
+      },
+      {
+        "name": "The Red Is Recording Rule",
+        "body": "O vermelho fica reservado à gravação e ao que mede a gravação (luz, agulha, segmentos quentes do medidor). Se aparece vermelho na tela, algo está gravando ou é o ponteiro de um mostrador.",
+        "section": "colors"
+      },
+      {
+        "name": "The One Ink Rule",
+        "body": "Ativo, escolhido, focado e pressionado se expressam em grafite: preenchido ou contornado. Não existe cor de acento para interação.",
+        "section": "colors"
+      },
+      {
+        "name": "The Tabular Only On Time Rule",
+        "body": "Algarismos tabulares só em `<time>` (horário no histórico). Nesta fonte o tnum alarga também a vírgula e o ponto, e no texto corrido isso vira \"Sim , sim ,\". Nunca aplicar tnum no corpo ou em contêineres de texto.",
+        "section": "typography"
+      },
+      {
+        "name": "The Lowercase Label Rule",
+        "body": "Títulos de seção, abas e a marca são em minúsculas, escritas assim na fonte do texto. Botões e frases seguem a caixa normal do português (\"Adicionar\", \"Vale a partir da próxima ditada.\").",
+        "section": "typography"
+      },
+      {
+        "name": "The Value On The Right Edge Rule",
+        "body": "Uma mensagem por linha: rótulo à esquerda, valor travado na borda direita. Teclas de atalho, contagem de tokens e \"sobram N\" obedecem a isso.",
+        "section": "layout"
+      },
+      {
+        "name": "The One Scale Rule",
+        "body": "No histórico todas as durações usam a mesma régua (a barra cheia corresponde ao valor indicado no cabeçalho da lista), para que durações se comparem de relance.",
+        "section": "layout"
+      },
+      {
+        "name": "The Flat Plate Rule",
+        "body": "Na janela, nada flutua. Separação é filete ou troca de tom de chapa, nunca sombra ou cartão.",
+        "section": "elevation"
+      }
+    ],
+    "dos": [
+      "**Do** separar seções com um filete de 1px no topo e espaço, sem cartão em volta.",
+      "**Do** pôr o valor na borda direita da linha, com o rótulo à esquerda.",
+      "**Do** escrever uma nota de consequência em segunda tinta sob cada controle que muda algo.",
+      "**Do** expressar ativo, escolhido e hover em grafite: contorno, ou preenchido com texto em chapa.",
+      "**Do** usar a mesma Schibsted Grotesk na janela e em qualquer superfície nativa, instalando-a localmente quando o desenho for fora do webview.",
+      "**Do** escrever títulos de seção, abas e a marca em minúsculas, e toda a interface em português.",
+      "**Do** desenhar controles de escala (traços, agulha) como rádios nativos, para que o mostrador seja o controle."
+    ],
+    "donts": [
+      "**Don't** usar verde, vermelho ou âmbar fora dos estados pronto, gravando e transcrevendo; erro é grafite 600, não vermelho.",
+      "**Don't** pôr sombra em elemento da janela; a sombra existe só na pílula que flutua sobre outros apps.",
+      "**Don't** aplicar algarismos tabulares fora de `<time>`.",
+      "**Don't** voltar o fundo para o alumínio quente (#e6e4df); ele lê como creme.",
+      "**Don't** agrupar ajustes em cartões arredondados nem usar o azul do sistema.",
+      "**Don't** fazer dashboard escuro com acentos neon."
+    ]
+  }
+}

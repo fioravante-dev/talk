@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>talk</title>
+<link rel="stylesheet" href="/assets/app.css">
+<script src="/assets/htmx.min.js"></script>
+<script src="/assets/app.js"></script>
+</head>
+<body hx-target="#app" hx-select="#app" hx-swap="outerHTML">
+<div id="app" data-phase="{{ shell.phase }}">
+  <header class="bar">
+    <span class="mark">talk</span>
+    <nav aria-label="Telas">
+      <a href="/historico" hx-get="/historico" hx-push-url="false" {% if shell.tab == "historico" %}class="on" aria-current="page"{% endif %}>histórico</a>
+      <a href="/vocabulario" hx-get="/vocabulario" hx-push-url="false" {% if shell.tab == "vocabulario" %}class="on" aria-current="page"{% endif %}>vocabulário</a>
+      <a href="/ajustes" hx-get="/ajustes" hx-push-url="false" {% if shell.tab == "ajustes" %}class="on" aria-current="page"{% endif %}>ajustes</a>
+    </nav>
+    <p class="state" role="status" aria-live="polite">
+      <span class="lamp" aria-hidden="true"></span>
+      <span class="when-idle">pronto · {% if shell.model_loaded %}modelo na GPU{% else %}modelo fora da GPU{% endif %}</span>
+      <span class="when-recording">gravando <span class="clock" data-clock>0:00</span></span>
+      <span class="when-transcribing">transcrevendo</span>
+      <span class="when-off">serviço parado: talk-rs serve</span>
+    </p>
+  </header>
+  <main id="conteudo">
+    {% block main %}{% endblock %}
+  </main>
+  <footer class="foot">
+    <span>serviço <b>{{ shell.service_mb }}</b></span>
+    <span>VRAM <b>{{ shell.vram_mb }}</b></span>
+    <span>última transcrição <b>{{ shell.last_stt }}</b></span>
+  </footer>
+</div>
+</body>
+</html>

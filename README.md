@@ -1,571 +1,128 @@
 # talk
 
-Ditado por voz 100% local para Linux. Grava do microfone, transcreve na GPU.
-Aperta um atalho, fala, aperta de novo — o texto aparece onde o cursor estiver.
-Opcionalmente, uma palavra-chave abre a ditada sem tocar no teclado.
-
-Nada sai da máquina. Sem API key, sem nuvem, sem assinatura.
+Ditado por voz 100% local para Linux. Aperta um atalho, fala, aperta de novo, e
+o texto aparece onde o cursor estiver. Nada sai da máquina: sem API key, sem
+nuvem, sem assinatura.
 
 ```
-      atalho ↘
-                microfone → pw-record → STT engine (GPU) → cola no cursor
-palavra-chave ↗
+atalho → pw-record → Silero VAD → Whisper (whisper.cpp, GPU) → vocabulário → cola no cursor
 ```
+
+Escrito em Rust. Em repouso o serviço ocupa ~100 MB de RAM e nenhuma VRAM: o
+modelo só carrega quando você aperta o atalho, enquanto você fala, e sai da GPU
+depois de ocioso.
+
+## As peças
+
+| binário | o que é | quando existe |
+|---|---|---|
+| `talk-rs serve` | o serviço: atalhos, bandeja, colagem, histórico | sempre (autostart) |
+| `talk-rs worker` | o único processo que toca na CUDA; termina depois de ocioso | do atalho até `whisper_keep_alive` |
+| `talk-ui` | a janela: histórico, vocabulário, ajustes | só enquanto está aberta |
+| `talk-pill` | a pílula de gravação no rodapé da tela (layer-shell, sem foco) | só enquanto grava |
+
+O código fica em `crates/`: `talk-core` (config, vocabulário, histórico, o fio
+com o trabalhador; tudo testável sem GPU), `talk` (o serviço), `talk-ui`,
+`talk-pill` e `talk-bench` (mede o whisper.cpp num corpus de WAVs).
 
 ## Os modelos
 
 | papel | modelo | VRAM |
 |---|---|---|
-| transcrição (default) | Whisper `large-v3-turbo` via faster-whisper | ~1,2 GB |
-| transcrição (`stt_motor = "qwen"`) | `Qwen3-ASR-1.7B` | ~4 GB |
-| detecção de voz | Silero VAD v6 | 1,2 MB, na CPU |
-| palavra-chave (opcional) | `hey_jarvis` via openWakeWord | ~3,7 MB, na CPU |
-| leitura em voz alta (opcional) | Piper `faber` (ou Kokoro-82M) | ~121 MB, na CPU |
+| transcrição (padrão) | Whisper large-v3, ggml q5_0 | ~2,2 GB |
+| transcrição (mais rápido) | Whisper large-v3-turbo, ggml q8_0 | ~1,3 GB |
+| detecção de voz | Silero v5.1.2, ggml | CPU |
 
-Whisper e os models opcional são baixados por
-`talk --download`, ou sozinhos na primeira ditada se
-você pular esse passo. Em repouso nada fica na VRAM: carregam quando você dita e
-saem depois de ociosos.
-
-## Transcription engines
-
-Two engines, one interface. `stt_motor` picks one; the caller never branches on
-it, it asks for a capability and the dispatcher refuses what the engine lacks.
-
-| engine | `stt_motor` | extra | languages | translate | hotwords | VAD |
-|---|---|---|---|---|---|---|
-| Qwen3-ASR-1.7B | `qwen` | `qwen` | 30, auto-detected | no | no | no |
-| faster-whisper (default) | `whisper` | none | 99 | yes, into English only | yes | yes |
-
-Whisper is the default: on an RTX 3060 with 6 GB it loads in ~3 s against
-Qwen's ~9 s, holds ~1.1 GB of VRAM against ~4.6 GB, and only Whisper translates.
-Both detect the spoken language. Pinning `language = "pt"` on a multilingual
-model conditions the decoder on that token, and English speech comes back as
-Portuguese text - a translation, not a transcription. That is why the default
-`language` is empty.
-
-Qwen stays one extra away:
+Em português o large-v3 q5 ganhou do turbo num teste às cegas; o turbo é ~1,7×
+mais rápido. Os dois ficam em `~/.cache/talk/models/`:
 
 ```bash
-uv sync --extra qwen          # Qwen3-ASR + torch (~4 GB of weights)
+mkdir -p ~/.cache/talk/models && cd ~/.cache/talk/models
+base=https://huggingface.co
+curl -LO $base/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-q5_0.bin
+curl -LO $base/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q8_0.bin
+curl -LO $base/ggml-org/whisper-vad/resolve/main/ggml-silero-v5.1.2.bin
 ```
-
-```toml
-stt_motor = "qwen"            # loads only when asked, never next to Whisper
-```
-
-Asking Qwen to translate raises instead of quietly doing nothing - the
-capability asymmetry is checked, not ignored.
-
-The torch path needs one system package that the wheels do not cover: Triton
-JIT-compiles a CUDA helper that `#include <Python.h>`, and Ubuntu ships no
-headers for the interpreter that `uv` manages.
-
-```bash
-sudo apt install libpython3.12-dev   # 5.7 MB, only for the qwen engine
-```
-
-Missing them is not a bug in this project: the run dies inside torch's forward
-pass while gcc looks for `/usr/include/python3.12/Python.h`. The package puts
-the headers exactly there. The failure is what `-m asr` reproduces; the remedy
-is read off that gcc line, and no test covers it.
-
-The real-model smoke test is opt-in, because it downloads ~4 GB and needs a
-GPU:
-
-```bash
-uv run pytest -m asr          # the default run skips it (`-m 'not asr'` in addopts)
-```
-
----
 
 ## Instalação
 
-Testado em Pop!_OS 24.04 (COSMIC/Wayland). Deve funcionar em qualquer distro com
-PipeWire.
-
-**Pré-requisitos:** driver NVIDIA instalado (`nvidia-smi` precisa responder) e
-cerca de **4,5 GB de disco** — 2,6 GB de dependências Python, das quais a maior
-parte são as bibliotecas CUDA, mais 1,6 GB do Whisper.
-Sem GPU funciona igual, só bem mais devagar, na CPU.
-
-### 1. Dependências do sistema
+Testado em Pop!_OS 24.04 (COSMIC, Wayland) com uma RTX 3060 de 6 GB.
 
 ```bash
-sudo apt install wl-clipboard libnotify-bin ydotool
+sudo apt install nvidia-cuda-toolkit clang libclang-dev wl-clipboard libnotify-bin \
+  libwebkit2gtk-4.1-dev libgtk-3-dev libgtk-layer-shell-dev
+CMAKE_CUDA_ARCHITECTURES=86 cargo build --release   # 86 = RTX 30xx
+for b in talk-rs talk-ui talk-pill; do install -m 755 target/release/$b ~/.local/bin/; done
 ```
 
-- `wl-clipboard` — área de transferência no Wayland (use `xclip` no X11)
-- `libnotify-bin` — notificações de estado
-- `ydotool` — emite o `Ctrl+V` que cola o texto no cursor
+Instale como cópia, não como link: recompilar troca o arquivo e o serviço em
+execução perderia o trabalhador.
 
-O `pw-record`, que captura o áudio, já vem com o PipeWire.
-
-### 2. uv
+O teclado virtual que cola o texto escreve em `/dev/uinput`. Confira a
+permissão com `getfacl /dev/uinput | grep "^user:"`; sem ela:
 
 ```bash
-curl -LsSf https://astral.sh/uv/install.sh | sh
-```
-
-O instalador do `uv` acrescenta `~/.local/bin` ao seu PATH, mas só nas sessões
-seguintes — **reabra o terminal** antes de continuar.
-
-### 3. O projeto
-
-```bash
-git clone https://github.com/fioravante-dev/talk.git
-cd talk
-uv sync
-```
-
-O comando fica em `.venv/bin/talk`, dentro do clone. Para chamá-lo de qualquer
-lugar:
-
-```bash
-mkdir -p ~/.local/bin
-ln -s "$PWD/.venv/bin/talk" ~/.local/bin/talk
-```
-
-Sem isso, use `uv run talk` de dentro do diretório do projeto.
-
-### 4. Permissão do /dev/uinput
-
-O `ydotool` precisa escrever nesse dispositivo. Em muitas distros já vem
-liberado pela tag `uaccess` do udev — confira antes de mexer:
-
-```bash
-getfacl /dev/uinput | grep "^user:"    # existe uma linha user:SEU_USUARIO:rw- ?
-```
-
-Se não existir:
-
-```bash
-sudo setfacl -m u:$USER:rw /dev/uinput                    # sessão atual
-echo 'KERNEL=="uinput", MODE="0660", TAG+="uaccess"' \
-  | sudo tee /etc/udev/rules.d/80-uinput.rules            # permanente
+echo 'KERNEL=="uinput", MODE="0660", TAG+="uaccess"' | sudo tee /etc/udev/rules.d/80-uinput.rules
 sudo udevadm control --reload-rules && sudo udevadm trigger
 ```
 
-### 5. Os atalhos
-
-Registre nas configurações do seu ambiente — no COSMIC, *Settings → Keyboard →
-Shortcuts → Custom*; no GNOME, *Configurações → Teclado → Atalhos
-personalizados*:
-
-| tecla sugerida | comando |
-|---|---|
-| `Super+D` | `/CAMINHO/PARA/talk/.venv/bin/talk -l pt` |
-| `Super+Alt+D` | `/CAMINHO/PARA/talk/.venv/bin/talk -l en` |
-
-Use o caminho absoluto do seu clone. É só isso — não há serviço para instalar.
-
-### 6. Os modelos
-
-```bash
-talk --download
-```
-
-Baixa Whisper — num comando só, com barra de
-progresso. São ~1,6 GB, então leva alguns minutos. Nada é carregado na VRAM: isso
-é preparação de máquina, não uso.
-
-Você pode pular este passo: sem ele, os modelos são baixados sozinhos na
-primeira ditada, e as notificações mostram o andamento. É só a espera que muda
-de lugar.
-
----
-
-## Uso
-
-**Pelo atalho:** aperta, fala, aperta de novo. O texto é colado onde o cursor
-estiver. As notificações mostram o estado: abrindo microfone → pode falar →
-transcrevendo → pronto.
-
-**Pela voz:** diga a palavra-chave e emende a frase; ela para sozinha quando você
-cala. Desligada por padrão — veja [Palavra-chave](#palavra-chave-hey-jarvis).
-
-**Pelo terminal:**
-
-```bash
-talk                          # grava, transcribe, imprime
-talk --loop                   # ditado contínuo até Ctrl-C
-talk -f reuniao.m4a   # transcreve um arquivo e organiza como nota
-talk -l en                    # ditado em inglês
-```
-
-**A gravação vai até você mandar parar** — `Enter` ou `Espaço` no terminal, ou o
-mesmo atalho de novo. Ela não corta sozinha no silêncio: pausar para pensar no
-meio de uma frase é normal, e perder a fala por isso é pior do que apertar uma
-tecla. Para cortar por silêncio, `--silence-secs 1.5`.
-
-### Saída (`--to`)
-
-| valor | destino |
-|---|---|
-| `auto` | num terminal imprime; por atalho, cola no cursor (padrão) |
-| `stdout` | imprime |
-| `clipboard` | copia, sem colar |
-| `paste` | copia e emite `Ctrl+V` — o texto entra de uma vez |
-| `type` | digita caractere a caractere, via `ydotool` |
-
-Se você ditar dentro de um terminal, onde `Ctrl+V` não cola:
-
-```bash
-talk --paste-key ctrl+shift+v
-```
-
----
-
-## Configuração
-
-```bash
-talk --init      # escreve ~/.config/talk/config.toml
-```
-
-Todo campo também aceita variável de ambiente (`TALK_MODEL`, `TALK_DEVICE`…)
-e flag de linha de comando, nessa ordem de precedência.
-
-Os principais:
-
-| campo | padrão | o que faz |
-|---|---|---|
-| `to` | `auto` | destino do texto |
-| `whisper_keep_alive` | `5m` | ocioso por esse tempo, o Whisper sai da VRAM |
-| `vocab` | vazio | termos que o Whisper costuma errar |
-| `wake` | `false` | ouvinte de palavra-chave (veja a seção abaixo) |
-| `wake_threshold` | `0.5` | limiar de disparo; calibre com `--wake-test` |
-| `wake_silence_secs` | `2.0` | silêncio que encerra a ditada aberta por voz |
-| `voz_motor` | `piper` | motor de síntese; `kokoro` é o alternativo |
-| `voz_velocidade` | `1.0` | velocidade da leitura em voz alta |
-| `read_language` | `auto` | voz da leitura; `auto` escolhe pelo texto |
-
-`whisper_keep_alive` aceita `30s`, `5m`, `1h`, `0` (libera após cada ditada) ou
-`never` (mantém sempre). Com o padrão de 5 minutos, ditadas em sequência são
-instantâneas e a VRAM é devolvida quando você para.
-
-O `vocab` vira o `initial_prompt` do Whisper:
-
-```toml
-vocab = "Kubernetes, PostgreSQL, Terraform, faster-whisper, systemd"
-```
-
-### Controle do daemon
-
-O daemon sobe sozinho na primeira ditada e mantém o modelo quente entre uma e
-outra. Não há nada para instalar nem serviço para habilitar: o cliente o cria
-quando não encontra nenhum, herdando o ambiente gráfico de quem chamou — que é
-justamente o que o clipboard e as notificações precisam.
-
-Parado, ele não ocupa VRAM, só o processo.
-
-```bash
-talk --status    # de pé?
-talk --stop      # encerra a gravação em andamento
-talk --quit      # desliga
-talk --no-daemon # ignora o daemon nesta chamada
-```
-
-O log dele fica em `~/.cache/talk/daemon.log`.
-
-## Desktop GUI
-
-Optional: the CLI is the whole product. The window edits the same
-`~/.config/talk/config.toml` the CLI reads, so the two can never disagree -
-the loader is the proof.
-
-```bash
-uv sync --extra gui                    # PySide6 (~30 MB of Qt)
-uv run python -m talk.gui              # from inside the project directory
-```
-
-Two surfaces in one window:
-
-- **Configurator** - one row per knob, the current value read from the file,
-  an editable line. Saving patches that one key in place: comments, blank
-  lines and keys this project never heard of survive, and a commented knob is
-  uncommented rather than appended (the file would carry the key twice).
-- **Panel** - the daemon's own `ping()` rendered as status lines, plus the last
-  dictations from `~/.cache/talk/history.jsonl`, each with a **copy** button
-  that sends an old text back to the clipboard.
-
-The history is written only on successful delivery, so a failed dictation is
-not in it. `--recordings` still points at the audio; the history is the text
-half.
-
----
-
-## Palavra-chave (`hey jarvis`)
-
-Um **segundo gatilho**, que soma ao atalho em vez de substituí-lo. Às vezes a mão
-já está no teclado e a tecla é mais rápida; às vezes ela está ocupada, e a voz é
-a única entrada que sobra. Os dois convivem, e vem desligada por padrão.
-
-### Ligar
-
-```bash
-uv sync --extra wake                 # no diretório do projeto
-```
-
-Depois, em `~/.config/talk/config.toml`:
-
-```toml
-wake = true
-```
-
-E baixe o modelo:
-
-```bash
-talk --download
-talk --quit                          # o daemon precisa subir de novo para ouvir
-```
-
-> Um `uv sync` sem `--extra wake` **remove** esses pacotes. Use sempre o extra
-> depois de ligar a palavra-chave.
-
-### Como ela para
-
-Esta é a diferença que importa em relação ao atalho: não há tecla para apertar de
-novo. A ditada aberta por voz **para sozinha** após `wake_silence_secs` (2 s) de
-silêncio, ou no teto de `wake_max_secs` (60 s). O `talk --stop` e o atalho de
-teclado também a encerram, se você quiser cortar antes.
-
-O corte por silêncio só arma depois de `wake_min_speech_secs` (0,5 s) de fala
-somada. Isso não é um detalhe: o rabo da própria palavra-chave sobra na fila
-quando o detector dispara, e sem esse acumulado ele contaria como fala — a pausa
-natural de quem espera o "pode falar" estouraria os 2 s de silêncio antes da
-primeira palavra, e a ditada sairia vazia.
-
-E se ela disparar por engano — um ruído que soou como a palavra-chave — e essa
-fala mínima não vier em `wake_grace_secs` (5 s), ela desiste calada: nenhuma
-notificação, nenhum arquivo, e o Whisper nem chega a ser acordado. O motivo fica
-registrado em `~/.cache/talk/daemon.log`, para um descarte indevido não se
-parecer com "não escutou".
-
-### Calibrar
-
-```bash
-talk --wake-test
-```
-
-Mostra o score ao vivo, de 0 a 1. Fale a palavra-chave umas dez vezes e anote o
-pico; depois converse, tussa, digite, e anote o teto do ruído. O limiar
-(`wake_threshold`, padrão 0.5) mora entre os dois — mais perto do ruído se você
-prefere repetir, mais perto do pico se prefere não ser interrompido no meio de
-uma conversa. Com um daemon de pé, o teste o cala enquanto roda e o devolve como
-estava ao sair.
-
-### Ouvir desde o login
-
-O ouvinte só existe enquanto o daemon existe, e o daemon nasce na primeira
-ditada. Para tê-lo escutando desde o login, crie
-`~/.config/autostart/talk.desktop`:
+Suba o serviço no login com `~/.config/autostart/talk-rs.desktop`:
 
 ```ini
 [Desktop Entry]
 Type=Application
-Name=talk (ouvinte de palavra-chave)
-Exec=/CAMINHO/PARA/talk/.venv/bin/talk --serve
-X-GNOME-Autostart-enabled=true
+Name=talk-rs
+Exec=sh -c "exec $HOME/.local/bin/talk-rs serve >>$HOME/.cache/talk/talk-rs-serve.log 2>&1"
+NoDisplay=true
 ```
 
-### O que custa
+E os atalhos, no COSMIC em Configurações → Teclado → Atalhos personalizados:
 
-Vale saber antes de ligar, não depois:
-
-- **O microfone fica aberto o tempo todo.** Em muitos desktops o indicador de
-  captura e o LED do microfone ficam permanentemente acesos, e o `talk` aparece
-  para sempre na lista de aplicativos usando o áudio.
-- **~6 % de um núcleo**, contínuo (medido numa RTX 3060 Laptop; o modelo em si
-  leva 2,4 ms por quadro de 80 ms, o resto é a captura e o laço).
-- **+~55 MB de dependências** — o openWakeWord importa scipy e scikit-learn no
-  topo do módulo, para um treinador de verificadores que este projeto não usa. É
-  por isso que ela é um extra opcional.
-- **Zero VRAM em repouso**: o Whisper continua só entrando quando você dita.
-- O áudio continua sem sair da máquina. A detecção é local, como o resto.
-
-### Só em inglês, por enquanto
-
-Os modelos prontos são `hey_jarvis`, `alexa`, `hey_mycroft` e `hey_rhasspy` — a
-palavra-chave é em inglês, a ditada continua em português. `hey_jarvis` é o mais
-robusto dos quatro contra falso positivo.
-
-Para uma em português, o openWakeWord tem um notebook que gera as amostras com
-TTS sintético e sai com um `.onnx` em menos de uma hora numa GPU. O campo aceita
-caminho, então não há código a mudar:
-
-```toml
-wake_model = "~/.cache/talk/wake/ei_computador.onnx"
-```
-
-Boas candidatas em pt-BR têm três ou quatro sílabas e não são palavras comuns —
-"ei computador", "escuta talk". Uma palavra que aparece em conversa normal vira
-ditada fantasma.
-
-### Licença dos modelos
-
-O código do openWakeWord é Apache-2.0, mas os **modelos pré-treinados são
-CC-BY-NC-SA 4.0** — uso não comercial. É por isso que eles são baixados para
-`~/.cache/talk/wake/` em vez de virem no repositório, que é MIT.
-
----
-
-## Ler em voz alta
-
-O caminho inverso do resto do projeto: em vez de voz virar texto, texto vira
-voz. Você destaca um trecho com o mouse, aperta o atalho, e ele lê.
-
-**É leitura da seleção, não da tela.** A diferença importa: o texto lido é
-exatamente o que está lá, sem OCR no meio. Num recurso usado justamente quando
-você não está olhando para o monitor, um erro de reconhecimento passaria sem
-você ter como perceber.
-
-### Ligar
-
-```bash
-uv sync --extra voz-leve   # no diretório do projeto
-talk --download            # baixa as vozes (~121 MB)
-```
-
-Registre um atalho, do mesmo jeito que os de ditado:
-
-| tecla sugerida | comando |
+| tecla | comando |
 |---|---|
-| `Super+L` | `/CAMINHO/PARA/talk/.venv/bin/talk --read` |
+| `Super+D` | `talk-rs toggle -l auto` |
+| `Super+Alt+D` | `talk-rs toggle -l en` |
 
-### Como funciona
+Fixar `-l pt` num modelo multilíngue faz fala em inglês sair traduzida para o
+português; por isso o padrão detecta.
 
-Destaque o texto e acione. **O mesmo atalho cala** — é o liga/desliga da
-ditada, e o único jeito de descobrir que era o texto errado é ouvir os
-primeiros segundos, então a saída precisa estar a um toque.
+## Configuração
 
-A notificação mostra o começo do texto e a duração estimada antes de começar
-(`🔊 Lendo · PT · ~2 min`). Não há limite de tamanho: truncar calado esconderia
-a perda. Se nada estiver destacado, ele avisa em vez de ficar mudo.
+`~/.config/talk/config.toml`, relido a cada ditada:
 
-A voz é escolhida pelo texto — uma contagem de palavras funcionais decide entre
-português e inglês. Para fixar, `read_language = "pt"` no config.
-
-**Três coisas param a leitura:**
-
-- o mesmo atalho, ou `talk --stop`;
-- **começar uma ditada** (por tecla ou por voz) — falar por cima da máquina
-  nunca é a intenção, e o microfone captaria o próprio Piper;
-- **a palavra-chave**, se você a tiver ligada. Durante a leitura, dizer
-  "hey jarvis" significa *calar*, não ditar. Isso te dá interrupção por voz sem
-  tirar a mão do que está fazendo, e resolve por construção o fato de o
-  alto-falante alimentar o microfone: se o próprio texto lido disparar o
-  detector, a consequência é ele se calar — o que remove a causa.
-
-### Dois motores
-
-O padrão é o **Piper**. Ele soa mais sintético que o Kokoro num trecho curto —
-e num teste cego pareado o Kokoro ganhou. Mas em uso real o Kokoro **engasga em
-texto corrido**, e uma pausa no meio da frase incomoda mais do que um timbre
-menos natural.
-
-| | `piper` (padrão) | `kokoro` |
+| chave | padrão | o que faz |
 |---|---|---|
-| disco | **61 MB por voz** | 347 MB, um modelo serve 54 vozes |
-| síntese | **~25x o tempo real** | ~4,5x o tempo real |
-| primeira amostra | **233 ms** | ~700 ms (só a 1ª leitura) |
-| fluidez em texto longo | **contínua** | engasga entre frases |
-| naturalidade (trecho curto) | mais sintético | **melhor** |
-| taxa | 22,05 kHz | 24 kHz |
-| licença | MIT | Apache 2.0 |
-| vozes pt-BR | `faber`, `cadu`, `jeff` | `pm_alex`, `pf_dora` |
+| `ggml_model` | `ggml-large-v3-q5_0.bin` | o modelo em `~/.cache/talk/models` |
+| `whisper_keep_alive` | `5m` | ocioso por esse tempo, o trabalhador termina e a VRAM volta a 0 (`0`, `30s`, `never`) |
+| `language` | vazio | vazio detecta; o `-l` do atalho vence |
+| `paste_key` | `ctrl+v` | `ctrl+shift+v` para terminais |
+| `input_device` | vazio | o `node.name` do microfone no PipeWire; vazio é o padrão do sistema |
+| `to` | `auto` | `clipboard` só copia; `stdout` só registra no log |
 
-**Por que o Kokoro engasga:** a síntese aqui é frase a frase, e o Kokoro produz
-a frase inteira de uma vez. A 4,5x o tempo real, sintetizar a próxima demora o
-bastante para o player secar no fim da atual — some uma fração de segundo entre
-as frases. O Piper a 25x nunca chega perto disso. Não é defeito do modelo: é
-falta de adiantar a síntese da frase seguinte enquanto a atual toca. Quem for
-mexer nisso, é aí que está o conserto.
+A janela (`talk-ui`, ou "Abrir talk" na bandeja) edita essas chaves sem apagar
+os comentários do arquivo.
 
-Para experimentar o Kokoro assim mesmo:
+## Vocabulário
+
+`~/.config/talk/vocab.txt`, uma linha por termo, relido a cada ditada:
+
+```text
+Pop!_OS                       só a dica: o Whisper passa a preferir a grafia
+Wayland = Weylend, Uêilend    a dica, e essas grafias viram "Wayland"
+```
+
+Os termos viram o `initial_prompt` do Whisper, que guarda só os últimos ~224
+tokens: o `vocab` do config vai na frente e os termos do arquivo por último.
+Troca só grafias que nunca são palavras de verdade.
+
+## Desenvolvimento
 
 ```bash
-uv sync --extra voz
+cargo test --release
+CMAKE_CUDA_ARCHITECTURES=86 cargo clippy --release --all-targets
+talk-ui --dump /tmp/talk-ui      # as telas em HTML, para conferir sem abrir a janela
+talk-pill --png /tmp             # os dois estados da pílula em PNG
 ```
 
-```toml
-voz_motor = "kokoro"
-```
-
-Para ajustar o Piper:
-
-```toml
-voz_pt = "pt_BR-cadu-medium"   # ou jeff; faber é o padrão
-voz_cadencia = 1.2             # variação de duração dos fonemas; >1.5 dá tremido
-```
-
-Os dois rodam em ONNX na **CPU** e não disputam VRAM com o Whisper.
-`voz_pt` e `voz_en` vazios usam a voz padrão do motor — trocar de motor
-não obriga a trocar os nomes, que não têm nada em comum entre os dois catálogos.
-
-Duas armadilhas que custaram tempo, registradas para quem for reaproveitar:
-
-- **`pt_BR-edresson` está quebrado para português.** Só existe em qualidade
-  "low", e o mapa de fonemas dele não tem o til (`̃`) — o som de "não",
-  "coração", "mãe".
-- **A taxa de amostragem vem do motor.** 24 kHz no Kokoro, 22,05 kHz no Piper.
-  Errar isso não dá erro: só deixa a voz mais grave ou mais aguda.
-
-### O que custa
-
-- **61 MB por voz** do Piper em `~/.cache/talk/voices/` (ou 347 MB do Kokoro,
-  em `~/.cache/talk/voices/kokoro/`).
-- **Zero VRAM.** Os dois rodam na CPU.
-- A síntese nunca é o gargalo — a reprodução é. Por isso ela é frase a frase e
-  vai direto para o player, em vez de esperar o texto inteiro.
-- O texto passa por uma limpeza determinística antes: URL vira "link", markdown
-  perde os marcadores, bloco de código é pulado. Regras fixas, não um LLM —
-  ele poderia reescrever, e o ponto é ler o que está lá.
-
-### Uma armadilha que não tem cura
-
-A seleção primária **não tem idade**. Ela guarda o último trecho que você
-destacou, seja há dois segundos ou há duas horas, e o programa não tem como
-distinguir. Por isso a notificação mostra o começo do texto: se vier algo de
-vinte minutos atrás, você vê na hora e cala num toque.
-
----
-
-## A fala nunca se perde
-
-O áudio vai para o disco **enquanto** é capturado, antes de qualquer modelo ser
-carregado. Só é apagado depois que o texto chegou ao destino e parece plausível.
-
-Se a transcrição falhar, faltar VRAM ou a colagem não funcionar, a gravação
-continua em `~/.cache/talk/recordings/` e a notificação diz onde:
-
-```bash
-talk --recordings   # o que sobrou
-talk --last         # reprocessa a última, do começo
-```
-
----
-
-## Arquitetura
-
-```
-src/talk/
-  cli.py      argumentos, orquestração, cliente do daemon
-  daemon.py   socket unix, ciclo de vida do modelo, notificações
-  audio.py    captura via pw-record, fluxo compartilhado, gravação em disco
-  wake.py     ouvinte de palavra-chave, openWakeWord em ONNX (opcional)
-  voz.py      leitura em voz alta, Kokoro ou Piper, síntese frase a frase
-  stt.py      dispatcher: motor, capability check, Transcript
-  stt_qwen.py Qwen3-ASR engine (default), torch lifecycle
-  stt_whisper.py faster-whisper engine, CPU fallback, hallucination filter
-  history.py  JSONL text history under ~/.cache/talk
-  gui.py      PySide6 configurator + live panel (optional extra)
-  output.py   stdout / clipboard / paste / type, com fallbacks
-  config.py   TOML < env < flags
-  cuda.py     carrega as libs CUDA dos wheels nvidia-*
-```
-
-Sem atalho de teclado, `talk --no-daemon` faz tudo num processo só.
-
-## Licença
-
-MIT — veja [LICENSE](LICENSE).
+O plano e as medidas da reescrita estão em `docs/plano-rust.md`; o sistema
+visual, em `DESIGN.md`.

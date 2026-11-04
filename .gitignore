@@ -1,15 +1,9 @@
-# Python-generated files
-__pycache__/
-*.py[oc]
-build/
-dist/
-wheels/
-*.egg-info
+# Rust
+/target/
 
-# Virtual environments
-.venv
+# Impeccable: capturas da revisão mostram ditadas reais; cache do detector
+/.impeccable/review/
+/.impeccable/hook.cache.json
 
-# Gravações e cache do talk (nunca devem ir para o repositório)
-recordings/
-*.wav
-*.raw
+# ferramentas locais de outros agentes
+/.qwen/
