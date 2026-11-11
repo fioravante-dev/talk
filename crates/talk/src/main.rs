@@ -4,9 +4,17 @@
 //!     talk-rs toggle [-l pt]   o que o atalho chama: começa ou termina a ditada
 //!     talk-rs status
 
+// Cada peça que conversa com o sistema tem um arquivo por plataforma, com a
+// mesma cara: o Linux fica como sempre foi, e o Windows soma ao lado.
+#[cfg_attr(windows, path = "audio_win.rs")]
 mod audio;
+#[cfg(windows)]
+#[path = "hotkeys_win.rs"]
+mod hotkeys;
+#[cfg_attr(windows, path = "output_win.rs")]
 mod output;
 mod service;
+#[cfg_attr(windows, path = "tray_win.rs")]
 mod tray;
 mod worker;
 
@@ -26,6 +34,10 @@ struct Cli {
 enum Cmd {
     /// Sobe o serviço.
     Serve,
+    /// Só no Windows: sobe o serviço em segundo plano, sem janela, com o log
+    /// em `%LOCALAPPDATA%\talk\serve.log`.
+    #[cfg(windows)]
+    Start,
     /// Começa a ditada; chamado de novo, termina e cola.
     Toggle {
         /// pt, en ou auto. Sem isto, vale o `language` do config.
@@ -45,6 +57,8 @@ enum Cmd {
 fn main() -> Result<()> {
     match Cli::parse().cmd {
         Cmd::Serve => service::serve(),
+        #[cfg(windows)]
+        Cmd::Start => service::start_detached(),
         Cmd::Worker { model } => worker::run(&model),
         Cmd::Toggle { language } => {
             let reply = service::request(&service::Request { cmd: "toggle".into(), language })?;

@@ -8,6 +8,7 @@ pub mod clean;
 pub mod config;
 pub mod history;
 pub mod paths;
+pub mod resample;
 pub mod shortcuts;
 pub mod vocab;
 pub mod wire;

@@ -5,6 +5,7 @@
 
 use std::sync::mpsc::Sender;
 
+pub use ksni::blocking::{Handle, TrayMethods};
 use ksni::menu::StandardItem;
 use ksni::{Icon, MenuItem};
 

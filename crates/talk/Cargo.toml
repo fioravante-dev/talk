@@ -16,10 +16,19 @@ path = "src/main.rs"
 [dependencies]
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
-evdev = "0.13"
-nix = { version = "0.30", features = ["signal"] }
-ksni = { version = "0.3", features = ["blocking"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 talk-core = { path = "../talk-core" }
 whisper-rs = { version = "0.16", features = ["cuda"] }
+
+[target.'cfg(unix)'.dependencies]
+evdev = "0.13"
+nix = { version = "0.30", features = ["signal"] }
+ksni = { version = "0.3", features = ["blocking"] }
+
+[target.'cfg(windows)'.dependencies]
+arboard = "3"
+cpal = "0.18"
+enigo = "0.6"
+uds_windows = "1"
+windows-hotkeys = "0.2"

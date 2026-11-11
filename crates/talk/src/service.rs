@@ -8,6 +8,7 @@
 //! próxima frase, sem reiniciar nada.
 
 use std::io::{BufRead, BufReader, Write};
+#[cfg(unix)]
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::PathBuf;
 use std::sync::mpsc;
@@ -16,15 +17,16 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, anyhow, bail};
-use ksni::blocking::{Handle, TrayMethods};
 use serde::{Deserialize, Serialize};
 use talk_core::config::Config;
 use talk_core::vocab::Vocab;
 use talk_core::{history, paths, wire::Job};
+#[cfg(windows)]
+use uds_windows::{UnixListener, UnixStream};
 
 use crate::audio::{Capture, RATE};
 use crate::output::{self, Keyboard};
-use crate::tray::{Action, Look, Tray};
+use crate::tray::{Action, Handle, Look, Tray, TrayMethods};
 use crate::worker::Worker;
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -371,6 +373,29 @@ pub fn open_window() -> Result<()> {
     Ok(())
 }
 
+/// No Windows um programa de console sempre ganha uma janela; o serviço sobe
+/// sem nenhuma (`CREATE_NO_WINDOW`), solto de quem o chamou.
+#[cfg(windows)]
+pub fn start_detached() -> Result<()> {
+    use std::os::windows::process::CommandExt;
+    if UnixStream::connect(paths::socket()).is_ok() {
+        bail!("já existe um talk-rs rodando");
+    }
+    std::fs::create_dir_all(paths::cache_dir())?;
+    let log = paths::cache_dir().join("serve.log");
+    let err = std::fs::OpenOptions::new().create(true).append(true).open(&log)?;
+    let child = std::process::Command::new(std::env::current_exe()?)
+        .arg("serve")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(err)
+        .creation_flags(crate::worker::NO_WINDOW | crate::worker::DETACHED)
+        .spawn()
+        .context("não deu para subir o serviço")?;
+    println!("talk-rs rodando (pid {}), log em {}", child.id(), log.display());
+    Ok(())
+}
+
 pub fn serve() -> Result<()> {
     let sock = paths::socket();
     if UnixStream::connect(&sock).is_ok() {
@@ -422,6 +447,8 @@ pub fn serve() -> Result<()> {
         }
     });
     service.reap();
+    #[cfg(windows)]
+    crate::hotkeys::spawn(service.clone(), &Config::load(&paths::config_file()).unwrap_or_default());
 
     eprintln!("[talk] ouvindo em {}", sock.display());
     for stream in listener.incoming() {

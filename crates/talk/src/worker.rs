@@ -123,6 +123,14 @@ fn transcribe(
     Ok((if junk { String::new() } else { text }, language))
 }
 
+/// `CREATE_NO_WINDOW`: sem isto, um serviço sem console que abre um processo
+/// de console faz uma janela preta piscar na tela a cada ditada.
+#[cfg(windows)]
+pub const NO_WINDOW: u32 = 0x0800_0000;
+/// `CREATE_NEW_PROCESS_GROUP`: o Ctrl+C de quem chamou não chega no filho.
+#[cfg(windows)]
+pub const DETACHED: u32 = 0x0000_0200;
+
 /// O lado de fora: o processo filho visto pelo serviço.
 pub struct Worker {
     child: Child,
@@ -136,7 +144,10 @@ impl Worker {
     pub fn spawn(model: &Path, log: &Path) -> Result<Self> {
         let exe = std::env::current_exe()?;
         let stderr = std::fs::OpenOptions::new().create(true).append(true).open(log)?;
-        let mut child = Command::new(exe)
+        let mut cmd = Command::new(exe);
+        #[cfg(windows)]
+        std::os::windows::process::CommandExt::creation_flags(&mut cmd, NO_WINDOW);
+        let mut child = cmd
             .arg("worker")
             .arg("--model")
             .arg(model)

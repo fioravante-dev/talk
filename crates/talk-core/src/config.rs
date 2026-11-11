@@ -3,6 +3,7 @@
 //! Chaves desconhecidas são ignoradas: o arquivo ainda carrega as da versão em
 //! Python, e elas não atrapalham.
 
+use std::collections::BTreeMap;
 use std::path::Path;
 use std::time::Duration;
 
@@ -29,6 +30,22 @@ pub struct Config {
     /// O microfone (`node.name` do PipeWire). Vazio = o padrão do sistema.
     /// Mesma chave do Python.
     pub input_device: String,
+    /// Só no Windows, onde não há atalho do sistema que rode um comando e o
+    /// próprio serviço registra as teclas: `"ctrl+alt+d" = "auto"`, uma tecla
+    /// por idioma. No Linux quem cuida é o COSMIC (ver `shortcuts`).
+    pub hotkeys: BTreeMap<String, String>,
+}
+
+/// O Super+D é do Windows (mostra a área de trabalho) e não pode ser registrado.
+fn default_hotkeys() -> BTreeMap<String, String> {
+    if cfg!(windows) {
+        [("ctrl+alt+d", "auto"), ("ctrl+alt+shift+d", "en")]
+            .into_iter()
+            .map(|(k, v)| (k.to_owned(), v.to_owned()))
+            .collect()
+    } else {
+        BTreeMap::new()
+    }
 }
 
 impl Default for Config {
@@ -42,6 +59,7 @@ impl Default for Config {
             vocab: String::new(),
             to: "auto".into(),
             input_device: String::new(),
+            hotkeys: default_hotkeys(),
         }
     }
 }
@@ -155,6 +173,13 @@ mod tests {
         let out = set_key(&out, "ggml_model", "ggml-large-v3-turbo-q8_0.bin").unwrap();
         assert!(out.ends_with("ggml_model = \"ggml-large-v3-turbo-q8_0.bin\"\n"));
         assert_eq!(Config::parse(&out).unwrap().paste_key, "ctrl+shift+v");
+    }
+
+    #[test]
+    fn hotkeys_map_a_combo_to_a_language() {
+        let cfg = Config::parse("[hotkeys]\n\"ctrl+alt+d\" = \"auto\"\n\"ctrl+alt+e\" = \"en\"\n").unwrap();
+        assert_eq!(cfg.hotkeys.get("ctrl+alt+e").map(String::as_str), Some("en"));
+        assert_eq!(cfg.hotkeys.len(), 2);
     }
 
     #[test]
