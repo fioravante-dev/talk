@@ -512,6 +512,7 @@ pub fn serve() -> Result<()> {
                     }
                 }
                 Action::Quit => {
+                    eprintln!("[talk] saindo (pela bandeja)");
                     let _ = std::fs::remove_file(paths::socket());
                     std::process::exit(0);
                 }
