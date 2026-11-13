@@ -36,9 +36,16 @@ pub fn spawn(service: Arc<Service>, cfg: &Config) {
         for (combo, language) in wanted {
             let me = service.clone();
             let registered = parse(&combo).and_then(|(key, mods)| {
+                let combo_now = combo.clone();
                 hkm.register(key, &mods, move || {
+                    // O idioma é relido a cada aperto: trocar na janela vale
+                    // na hora. Teclas novas, só ao reiniciar o serviço.
+                    let language = Config::load(&talk_core::paths::config_file())
+                        .ok()
+                        .and_then(|c| c.hotkeys.get(&combo_now).cloned())
+                        .unwrap_or_else(|| language.clone());
                     eprintln!("[talk] atalho apertado ({language})");
-                    if let Err(e) = me.toggle(Some(language.clone())) {
+                    if let Err(e) = me.toggle(Some(language)) {
                         eprintln!("[talk] {e:#}");
                     }
                 })

@@ -38,6 +38,12 @@ enum Cmd {
     /// em `%LOCALAPPDATA%\talk\serve.log`.
     #[cfg(windows)]
     Start,
+    /// Só no Windows: sobe (on) ou não (off) no login.
+    #[cfg(windows)]
+    Autostart {
+        #[arg(value_parser = ["on", "off"])]
+        state: String,
+    },
     /// Começa a ditada; chamado de novo, termina e cola.
     Toggle {
         /// pt, en ou auto. Sem isto, vale o `language` do config.
@@ -59,6 +65,8 @@ fn main() -> Result<()> {
         Cmd::Serve => service::serve(),
         #[cfg(windows)]
         Cmd::Start => service::start_detached(),
+        #[cfg(windows)]
+        Cmd::Autostart { state } => service::autostart(state == "on"),
         Cmd::Worker { model } => worker::run(&model),
         Cmd::Toggle { language } => {
             let reply = service::request(&service::Request { cmd: "toggle".into(), language })?;

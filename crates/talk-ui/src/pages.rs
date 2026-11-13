@@ -10,6 +10,7 @@ use askama::Template;
 use talk_core::config::{self, Config};
 use talk_core::history;
 use talk_core::paths;
+#[cfg(not(windows))]
 use talk_core::shortcuts;
 use talk_core::vocab::{self, Entry, Vocab};
 
@@ -32,8 +33,21 @@ pub fn secs(s: f64) -> String {
 
 fn shell(tab: &'static str) -> Shell {
     let st = system::status();
-    let service_mb = st.pid.and_then(system::rss_mb).map_or("—".into(), |mb| format!("{mb:.0} MB"));
-    let vram_mb = system::worker_vram_mb().map_or("—".into(), |mb| format!("{mb} MB"));
+    let service_mb = system::service_mb(&st).map_or("—".into(), |mb| format!("{mb:.0} MB"));
+    // No Windows o nvidia-smi não separa a VRAM por processo: diz só se há
+    // modelo na GPU (o trabalhador vivo) ou não.
+    let vram_mb = system::worker_vram_mb().map_or_else(
+        || {
+            if !cfg!(windows) {
+                "—".into()
+            } else if st.model_loaded {
+                "em uso".into()
+            } else {
+                "0 MB".into()
+            }
+        },
+        |mb| format!("{mb} MB"),
+    );
     let last_stt = history::read(&paths::history_file(), 1)
         .first()
         .map_or("—".into(), |e| secs(e.stt_seconds));
@@ -90,7 +104,22 @@ pub struct Ajustes {
     pub keep_index: usize,
     pub keep_note: String,
     pub mics: Vec<MicChoice>,
+    /// HTML fixo, escrito aqui (vai para a página sem escapar).
+    /// O que dizer sobre os atalhos muda com quem é dono das teclas: o COSMIC
+    /// no Linux, o próprio serviço no Windows.
+    pub shortcuts_empty: &'static str,
+    pub shortcuts_note: &'static str,
 }
+
+#[cfg(windows)]
+const SHORTCUTS_EMPTY: &str =
+    "Nenhum atalho no [hotkeys] do config.toml. Por exemplo: <code>\"ctrl+alt+d\" = \"auto\"</code>, e reinicie o talk.";
+#[cfg(windows)]
+const SHORTCUTS_NOTE: &str = "O idioma vale no próximo aperto. Teclas novas, no [hotkeys] do config.toml, valem ao reiniciar o talk.";
+#[cfg(not(windows))]
+const SHORTCUTS_EMPTY: &str = "Nenhum atalho do talk no COSMIC. Cadastre em Configurações → Teclado → Atalhos personalizados, com o comando <code>talk-rs toggle</code>.";
+#[cfg(not(windows))]
+const SHORTCUTS_NOTE: &str = "O COSMIC aplica a troca no próximo aperto.";
 
 const LANGUAGES: [(&str, &str); 3] = [("auto", "detectar"), ("pt", "português"), ("en", "inglês")];
 const KEEP: [(&str, &str); 5] = [("0", "0"), ("30s", "30 s"), ("5m", "5 min"), ("15m", "15 min"), ("never", "sempre")];
@@ -122,18 +151,43 @@ pub fn keep_note(index: usize, size: &str) -> String {
     }
 }
 
+fn language_label(language: &str) -> String {
+    match language {
+        "en" => "Ditar em inglês",
+        "pt" => "Ditar em português",
+        _ => "Ditar, detectando o idioma",
+    }
+    .to_owned()
+}
+
+/// No Windows os atalhos são do próprio serviço, no `[hotkeys]` do config; o
+/// combo faz o papel da descrição do COSMIC (é o que identifica a linha).
+#[cfg(windows)]
+fn shortcut_rows() -> Vec<ShortcutRow> {
+    let cfg = Config::load(&paths::config_file()).unwrap_or_default();
+    cfg.hotkeys
+        .iter()
+        .map(|(combo, language)| {
+            let language = if language.is_empty() { "auto".to_owned() } else { language.clone() };
+            ShortcutRow {
+                label: language_label(&language),
+                keys: config::hotkey_keys(combo),
+                combo: combo.clone(),
+                language,
+                description: Some(combo.clone()),
+            }
+        })
+        .collect()
+}
+
+#[cfg(not(windows))]
 fn shortcut_rows() -> Vec<ShortcutRow> {
     shortcuts::parse(&read(&shortcuts::cosmic_file()))
         .into_iter()
         .filter(shortcuts::Binding::is_talk)
         .map(|b| {
             let language = b.language().unwrap_or_else(|| "auto".into());
-            let label = match language.as_str() {
-                "en" => "Ditar em inglês",
-                "pt" => "Ditar em português",
-                _ => "Ditar, detectando o idioma",
-            }
-            .to_owned();
+            let label = language_label(&language);
             ShortcutRow {
                 label,
                 keys: b.keys(),
@@ -182,6 +236,8 @@ pub fn ajustes() -> Result<String> {
         keep_index: idx,
         keep_note: keep_note(idx, chosen_size),
         mics,
+        shortcuts_empty: SHORTCUTS_EMPTY,
+        shortcuts_note: SHORTCUTS_NOTE,
     }
     .render()?)
 }
@@ -199,6 +255,17 @@ pub fn ajustar(what: &str, form: &HashMap<String, String>) -> Result<String> {
         "modelo" if MODELS.iter().any(|m| m.0 == value) => set_config("ggml_model", value)?,
         "carregado" if KEEP.iter().any(|k| k.0 == value) => set_config("whisper_keep_alive", value)?,
         "microfone" => set_config("input_device", value)?,
+        #[cfg(windows)]
+        "idioma" if LANGUAGES.iter().any(|l| l.0 == value) => {
+            let path = paths::config_file();
+            let text = read(&path);
+            let current = Config::parse(&text).unwrap_or_default().hotkeys;
+            let combo = form.get("atalho").map(String::as_str).unwrap_or("");
+            if current.contains_key(combo) {
+                write_atomic(&path, &config::set_hotkey(&text, &current, combo, value)?)?;
+            }
+        }
+        #[cfg(not(windows))]
         "idioma" if LANGUAGES.iter().any(|l| l.0 == value) => {
             let path = shortcuts::cosmic_file();
             let text = read(&path);

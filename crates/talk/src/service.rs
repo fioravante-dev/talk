@@ -45,6 +45,10 @@ pub struct Reply {
     pub pid: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model_loaded: Option<bool>,
+    /// Só no Windows: a RAM do próprio serviço, que lá a janela não tem como
+    /// ler barato (no Linux ela lê o `/proc`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rss_mb: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
 }
@@ -83,10 +87,22 @@ fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
+#[cfg(unix)]
 fn notify(title: &str, body: &str) {
     let _ = std::process::Command::new("notify-send")
         .args(["-a", "talk", "-t", "2500", title, body])
         .spawn();
+}
+
+/// No Windows, a notificação nativa (toast). Mostrar leva alguns ms de COM:
+/// numa thread, para não atrasar a colagem.
+#[cfg(windows)]
+fn notify(title: &str, body: &str) {
+    eprintln!("[talk] {title} {body}");
+    let (title, body) = (title.to_owned(), body.to_owned());
+    thread::spawn(move || {
+        let _ = notify_rust::Notification::new().summary(&title).body(&body).show();
+    });
 }
 
 fn log_file() -> PathBuf {
@@ -166,10 +182,14 @@ impl Service {
                 drop(phase);
                 // A pílula ouve os eventos sozinha e sai quando a fase volta a
                 // pronto; sem layer-shell ou sem o binário, segue sem ela.
-                if let Ok(exe) = std::env::current_exe() {
-                    let _ = std::process::Command::new(exe.with_file_name("talk-pill"))
+                if let Ok(exe) = std::env::current_exe()
+                    && let Ok(mut pill) = std::process::Command::new(sibling(&exe, "talk-pill"))
                         .stderr(std::process::Stdio::null())
-                        .spawn();
+                        .spawn()
+                {
+                    // Recolhe a pílula quando ela sai; sem o `wait`, cada
+                    // ditada deixava um processo zumbi.
+                    thread::spawn(move || pill.wait());
                 }
                 self.set_look(Look::Recording { bright: true }, "gravando");
                 let me = self.clone();
@@ -346,7 +366,9 @@ impl Service {
                 phase: lock(&self.phase).name().into(),
                 pid: Some(std::process::id()),
                 model_loaded: Some(lock(&self.worker).as_mut().is_some_and(Worker::alive)),
-                error: None,
+                #[cfg(windows)]
+                rss_mb: memory_stats::memory_stats().map(|m| m.physical_mem as f64 / 1_048_576.0),
+                ..Reply::default()
             },
             "subscribe" => {
                 // A conexão fica aberta: daqui em diante ela recebe os eventos.
@@ -363,10 +385,16 @@ impl Service {
     }
 }
 
+/// Um binário do talk ao lado deste (`talk-ui`, `talk-pill`), com o `.exe` no Windows.
+fn sibling(exe: &std::path::Path, name: &str) -> PathBuf {
+    exe.with_file_name(format!("{name}{}", std::env::consts::EXE_SUFFIX))
+}
+
 /// A janela é outro binário (`talk-ui`), ao lado deste: o serviço nunca carrega
-/// o motor web, e a janela só existe enquanto está aberta.
+/// o motor web. No Linux ela só existe enquanto está aberta; no Windows ela
+/// fica escondida em segundo plano, e isto só a traz para a frente.
 pub fn open_window() -> Result<()> {
-    let exe = std::env::current_exe()?.with_file_name("talk-ui");
+    let exe = sibling(&std::env::current_exe()?, "talk-ui");
     std::process::Command::new(&exe)
         .spawn()
         .with_context(|| format!("não deu para abrir {}", exe.display()))?;
@@ -396,6 +424,32 @@ pub fn start_detached() -> Result<()> {
     Ok(())
 }
 
+/// Só no Windows: liga ou desliga o início no login (`HKCU\...\Run`),
+/// apontando para o `talk-start.exe` ao lado deste, que sobe sem janela.
+#[cfg(windows)]
+pub fn autostart(on: bool) -> Result<()> {
+    use winreg::RegKey;
+    use winreg::enums::HKEY_CURRENT_USER;
+    let (run, _) = RegKey::predef(HKEY_CURRENT_USER)
+        .create_subkey(r"Software\Microsoft\Windows\CurrentVersion\Run")
+        .context("não deu para abrir o registro")?;
+    if on {
+        let start = std::env::current_exe()?.with_file_name("talk-start.exe");
+        if !start.exists() {
+            bail!("{} não existe", start.display());
+        }
+        run.set_value("talk", &format!("\"{}\"", start.display()))?;
+        println!("o talk sobe no login: {}", start.display());
+    } else {
+        match run.delete_value("talk") {
+            Ok(()) => println!("o talk não sobe mais no login"),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => println!("já não subia no login"),
+            Err(e) => return Err(e.into()),
+        }
+    }
+    Ok(())
+}
+
 pub fn serve() -> Result<()> {
     let sock = paths::socket();
     if UnixStream::connect(&sock).is_ok() {
@@ -415,10 +469,28 @@ pub fn serve() -> Result<()> {
     });
 
     let (tx, rx) = mpsc::channel();
-    match (Tray { look: Look::Idle, tooltip: "pronto".into(), actions: tx }).spawn() {
-        Ok(h) => *lock(&service.tray) = Some(h),
-        Err(e) => eprintln!("[talk] sem bandeja: {e}"),
-    }
+    // No login o serviço pode subir antes do painel: sem quem receba o ícone,
+    // o registro falha. Tenta de novo a cada 2 s até o painel aparecer.
+    let me = service.clone();
+    thread::spawn(move || {
+        for attempt in 0u32.. {
+            match (Tray { look: Look::Idle, tooltip: "pronto".into(), actions: tx.clone() }).spawn() {
+                Ok(h) => {
+                    if attempt > 0 {
+                        eprintln!("[talk] bandeja de pé (tentativa {})", attempt + 1);
+                    }
+                    *lock(&me.tray) = Some(h);
+                    return;
+                }
+                Err(e) => {
+                    if attempt == 0 {
+                        eprintln!("[talk] sem bandeja ainda, tentando de novo: {e}");
+                    }
+                    thread::sleep(Duration::from_secs(2));
+                }
+            }
+        }
+    });
     let me = service.clone();
     thread::spawn(move || {
         for action in rx {
@@ -449,6 +521,13 @@ pub fn serve() -> Result<()> {
     service.reap();
     #[cfg(windows)]
     crate::hotkeys::spawn(service.clone(), &Config::load(&paths::config_file()).unwrap_or_default());
+
+    // A janela sobe já, escondida: o WebView2 leva ~1 s para acordar a frio,
+    // e assim abrir pela bandeja é só mostrar.
+    #[cfg(windows)]
+    if let Ok(exe) = std::env::current_exe() {
+        let _ = std::process::Command::new(sibling(&exe, "talk-ui")).arg("--hidden").spawn();
+    }
 
     eprintln!("[talk] ouvindo em {}", sock.display());
     for stream in listener.incoming() {

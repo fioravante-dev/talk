@@ -13,6 +13,11 @@ workspace = true
 name = "talk-rs"
 path = "src/main.rs"
 
+# Só faz sentido no Windows: sobe o serviço sem piscar janela (o login chama este).
+[[bin]]
+name = "talk-start"
+path = "src/start.rs"
+
 [dependencies]
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
@@ -30,5 +35,10 @@ ksni = { version = "0.3", features = ["blocking"] }
 arboard = "3"
 cpal = "0.18"
 enigo = "0.6"
+memory-stats = "1"
+notify-rust = "4"
+tao = "0.37"
+tray-icon = "0.26"
 uds_windows = "1"
 windows-hotkeys = "0.2"
+winreg = "0.56"

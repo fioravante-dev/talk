@@ -111,6 +111,37 @@ pub fn set_key(text: &str, key: &str, value: impl Into<toml_edit::Value>) -> Res
     Ok(doc.to_string())
 }
 
+/// Troca o idioma de um atalho do `[hotkeys]` (Windows), preservando o resto
+/// do arquivo. Sem a tabela no arquivo valem os padrões (`current`): eles são
+/// escritos primeiro, para que mexer num atalho não apague o outro.
+pub fn set_hotkey(text: &str, current: &BTreeMap<String, String>, combo: &str, language: &str) -> Result<String> {
+    let mut doc: toml_edit::DocumentMut = text.parse().context("config.toml inválido")?;
+    if !doc.contains_table("hotkeys") {
+        let mut table = toml_edit::Table::new();
+        for (k, v) in current {
+            table[k.as_str()] = toml_edit::value(v.as_str());
+        }
+        doc["hotkeys"] = toml_edit::Item::Table(table);
+    }
+    doc["hotkeys"][combo] = toml_edit::value(language);
+    Ok(doc.to_string())
+}
+
+/// "ctrl+alt+shift+d" → Ctrl, Alt, Shift, D: como se lê no teclado.
+pub fn hotkey_keys(combo: &str) -> Vec<String> {
+    combo
+        .split('+')
+        .map(|k| match k.trim().to_lowercase().as_str() {
+            "ctrl" | "control" => "Ctrl".to_owned(),
+            "win" | "windows" | "super" => "Win".to_owned(),
+            other => {
+                let mut c = other.chars();
+                c.next().map_or(String::new(), |f| f.to_uppercase().chain(c).collect())
+            }
+        })
+        .collect()
+}
+
 pub fn parse_duration(text: &str) -> Result<Option<Duration>> {
     let t = text.trim();
     if t == "never" || t == "-1" {
@@ -180,6 +211,29 @@ mod tests {
         let cfg = Config::parse("[hotkeys]\n\"ctrl+alt+d\" = \"auto\"\n\"ctrl+alt+e\" = \"en\"\n").unwrap();
         assert_eq!(cfg.hotkeys.get("ctrl+alt+e").map(String::as_str), Some("en"));
         assert_eq!(cfg.hotkeys.len(), 2);
+    }
+
+    #[test]
+    fn set_hotkey_keeps_the_other_shortcut_and_the_comments() {
+        let defaults: BTreeMap<String, String> =
+            [("ctrl+alt+d", "auto"), ("ctrl+alt+shift+d", "en")].map(|(k, v)| (k.into(), v.into())).into();
+        // Sem tabela: os padrões entram junto, e só o pedido muda.
+        let out = set_hotkey("# topo\npaste_key = \"ctrl+v\"\n", &defaults, "ctrl+alt+d", "pt").unwrap();
+        assert!(out.starts_with("# topo\n"));
+        let cfg = Config::parse(&out).unwrap();
+        assert_eq!(cfg.hotkeys.get("ctrl+alt+d").map(String::as_str), Some("pt"));
+        assert_eq!(cfg.hotkeys.get("ctrl+alt+shift+d").map(String::as_str), Some("en"));
+        // Com tabela: troca no lugar.
+        let out = set_hotkey(&out, &defaults, "ctrl+alt+shift+d", "auto").unwrap();
+        let cfg = Config::parse(&out).unwrap();
+        assert_eq!(cfg.hotkeys.get("ctrl+alt+shift+d").map(String::as_str), Some("auto"));
+        assert_eq!(cfg.hotkeys.len(), 2);
+    }
+
+    #[test]
+    fn hotkeys_read_as_on_the_keyboard() {
+        assert_eq!(hotkey_keys("ctrl+alt+shift+d"), ["Ctrl", "Alt", "Shift", "D"]);
+        assert_eq!(hotkey_keys("win+f9"), ["Win", "F9"]);
     }
 
     #[test]

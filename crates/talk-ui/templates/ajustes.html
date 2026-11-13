@@ -5,7 +5,7 @@
     <section aria-labelledby="h-atalhos">
       <h2 id="h-atalhos">atalhos</h2>
       {% if shortcuts.is_empty() %}
-      <p class="empty">Nenhum atalho do talk no COSMIC. Cadastre em Configurações → Teclado → Atalhos personalizados, com o comando <code>talk-rs toggle</code>.</p>
+      <p class="empty">{{ shortcuts_empty|safe }}</p>
       {% endif %}
       {% for s in shortcuts %}
       <div class="row shortcut">
@@ -21,7 +21,7 @@
       </form>
       {% endif %}
       {% endfor %}
-      <p class="note">O COSMIC aplica a troca no próximo aperto.</p>
+      <p class="note">{{ shortcuts_note }}</p>
     </section>
     <section aria-labelledby="h-colar">
       <h2 id="h-colar">colar com</h2>

@@ -9,12 +9,17 @@
 //!
 //! Uma janela só: abrir de novo traz a que já existe para a frente.
 
+// No Windows a janela é um app sem console: aberta pela bandeja, nada pisca.
+#![cfg_attr(windows, windows_subsystem = "windows")]
+
 mod pages;
+#[cfg_attr(windows, path = "system_win.rs")]
 mod system;
 
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
+#[cfg(unix)]
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::time::Duration;
 
@@ -23,8 +28,16 @@ use tao::event::{Event, WindowEvent};
 use tao::event_loop::{ControlFlow, EventLoopBuilder, EventLoopProxy};
 use tao::window::WindowBuilder;
 use talk_core::paths;
+#[cfg(windows)]
+use uds_windows::{UnixListener, UnixStream};
 use wry::WebViewBuilder;
 use wry::http::{Request, Response, header::CONTENT_TYPE};
+
+#[cfg(unix)]
+const START: &str = "talk://localhost/historico";
+/// O WebView2 serve protocolos próprios como `http://<nome>.localhost`.
+#[cfg(windows)]
+const START: &str = "http://talk.localhost/historico";
 
 #[derive(Debug)]
 enum UserEvent {
@@ -142,6 +155,10 @@ fn main() -> anyhow::Result<()> {
         let _ = writeln!(s, "raise");
         return Ok(());
     }
+    // No Windows o serviço já sobe a janela escondida (`--hidden`) no login:
+    // o WebView2 leva quase um segundo para acordar a frio, e assim "abrir" é
+    // só mostrar. Fechar também só esconde.
+    let hidden = args.iter().any(|a| a == "--hidden");
     let _ = std::fs::remove_file(ui_socket());
     let listener = UnixListener::bind(ui_socket()).ok();
 
@@ -150,20 +167,34 @@ fn main() -> anyhow::Result<()> {
         .with_title("talk")
         .with_inner_size(LogicalSize::new(960.0, 680.0))
         .with_min_inner_size(LogicalSize::new(720.0, 520.0))
+        .with_visible(!hidden)
         .build(&event_loop)?;
 
     let builder = WebViewBuilder::new()
         .with_custom_protocol("talk".into(), move |_id, req| route(&req))
-        .with_url("talk://localhost/historico")
+        .with_url(START)
         .with_background_color((0xe1, 0xe2, 0xe0, 0xff));
+    #[cfg(unix)]
     let webview = {
         use tao::platform::unix::WindowExtUnix;
         use wry::WebViewBuilderExtUnix;
         let vbox = window.default_vbox().ok_or_else(|| anyhow::anyhow!("sem GTK vbox"))?;
         builder.build_gtk(vbox)?
     };
+    // No Windows o WebView2 vai direto na janela. O `talk://` vira
+    // `http://talk.localhost` lá dentro, mas é o mesmo protocolo interno:
+    // nenhuma porta é aberta.
+    #[cfg(windows)]
+    let webview = builder.build(&window)?;
 
     subscribe(event_loop.create_proxy());
+    #[cfg(windows)]
+    let mut shown = !hidden;
+    // Escondido, o WebView2 baixa o próprio consumo (renderização parada).
+    #[cfg(windows)]
+    if hidden {
+        let _ = webview.set_visible(false);
+    }
     if let Some(listener) = listener {
         let proxy = event_loop.create_proxy();
         std::thread::spawn(move || {
@@ -176,13 +207,34 @@ fn main() -> anyhow::Result<()> {
     event_loop.run(move |event, _, flow| {
         *flow = ControlFlow::Wait;
         match event {
+            // Escondida e sem serviço (ele saiu pela bandeja): sai junto.
+            #[cfg(windows)]
+            Event::UserEvent(UserEvent::Script(json)) if !shown && json.contains(r#""phase":"off""#) => {
+                let _ = std::fs::remove_file(ui_socket());
+                *flow = ControlFlow::Exit;
+            }
             Event::UserEvent(UserEvent::Script(json)) => {
                 let _ = webview.evaluate_script(&format!("window.talkEvent && talkEvent({json})"));
             }
             Event::UserEvent(UserEvent::Raise) => {
+                #[cfg(windows)]
+                {
+                    shown = true;
+                    let _ = webview.set_visible(true);
+                    window.set_minimized(false);
+                }
                 window.set_visible(true);
                 window.set_focus();
             }
+            #[cfg(windows)]
+            Event::WindowEvent { event: WindowEvent::CloseRequested, .. } => {
+                // Volta para o histórico, como uma janela nova abriria, e some.
+                shown = false;
+                window.set_visible(false);
+                let _ = webview.set_visible(false);
+                let _ = webview.load_url(START);
+            }
+            #[cfg(unix)]
             Event::WindowEvent { event: WindowEvent::CloseRequested, .. } => {
                 let _ = std::fs::remove_file(ui_socket());
                 *flow = ControlFlow::Exit;

@@ -37,6 +37,11 @@ pub fn status() -> Status {
     }
 }
 
+/// RAM do serviço, pelo `/proc` dele.
+pub fn service_mb(st: &Status) -> Option<f64> {
+    st.pid.and_then(rss_mb)
+}
+
 pub fn rss_mb(pid: u32) -> Option<f64> {
     let status = std::fs::read_to_string(format!("/proc/{pid}/status")).ok()?;
     let kb: f64 = status.lines().find(|l| l.starts_with("VmRSS:"))?.split_whitespace().nth(1)?.parse().ok()?;

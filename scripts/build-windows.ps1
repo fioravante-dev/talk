@@ -1,6 +1,6 @@
 # Compila o talk no Windows, com o ambiente que o whisper.cpp com CUDA precisa.
 #
-#   .\scripts\build-windows.ps1                  # cargo build --release -p talk
+#   .\scripts\build-windows.ps1                  # o serviço, a janela e a pílula
 #   .\scripts\build-windows.ps1 test -p talk     # qualquer outro comando do cargo
 #
 # Precisa de: Rust (rustup), Visual Studio 2022 com C++, CUDA Toolkit >= 12.8
@@ -32,7 +32,7 @@ cmd /c "`"$vs\VC\Auxiliary\Build\vcvars64.bat`" >nul && set" | ForEach-Object {
 if (-not $env:LIBCLANG_PATH) { $env:LIBCLANG_PATH = "C:\Program Files\LLVM\bin" }
 $env:CMAKE_CUDA_ARCHITECTURES = if ($env:CUDA_ARCH) { $env:CUDA_ARCH } else { "120" }
 
-if ($args.Count -eq 0) { $args = @("build", "--release", "-p", "talk") }
+if ($args.Count -eq 0) { $args = @("build", "--release", "-p", "talk", "-p", "talk-ui", "-p", "talk-pill") }
 # O cargo escreve o progresso no stderr, e o PowerShell 5 com "Stop" trata
 # qualquer linha de stderr de um programa como erro fatal.
 $ErrorActionPreference = "Continue"
