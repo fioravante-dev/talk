@@ -49,6 +49,8 @@ $app = "$dist\talk-app-$version-cuda$cudaMajor.zip"
 Compress-Archive -Path "$dist\talk-rs.exe", "$dist\talk-start.exe", "$dist\talk-ui.exe", "$dist\talk-pill.exe" -DestinationPath $app -Force
 foreach ($f in $app, "$dist\talk-setup-$version.exe") {
     $hash = (Get-FileHash $f -Algorithm SHA256).Hash.ToLower()
-    [IO.File]::WriteAllText("$f.sha256", "$hash  $(Split-Path $f -Leaf)`n")
+    # Set-Content, não [IO.File]: o .NET resolve caminho relativo pela pasta do
+    # processo, não pela do script.
+    Set-Content -Path "$f.sha256" -Value "$hash  $(Split-Path $f -Leaf)" -Encoding ascii
 }
 Get-ChildItem $dist -Filter "talk-*" | Select-Object Name, @{n = "MB"; e = { [math]::Round($_.Length / 1MB) } }
