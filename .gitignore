@@ -7,3 +7,9 @@
 
 # ferramentas locais de outros agentes
 /.qwen/
+
+# notas de trabalho que ficam só na máquina (design, plano da reescrita)
+/.impeccable/
+/DESIGN.md
+/PRODUCT.md
+/docs/plano-rust.md

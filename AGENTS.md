@@ -43,6 +43,17 @@ Logs: `~/.cache/talk/` no Linux, `%LOCALAPPDATA%\talk\` no Windows.
 Depois de instalado, o próprio talk se atualiza (`talk-rs update`, ou pela
 bandeja). Ele puxa do código registrado em `~/.cache/talk/install.toml`.
 
+## Onde fica cada coisa
+
+| | Linux | Windows |
+|---|---|---|
+| programas | `~/.local/bin/` | `%LOCALAPPDATA%\Programs\talk\` |
+| config, vocabulário | `~/.config/talk/` (`config.toml`, `vocab.txt`) | `%APPDATA%\talk\` |
+| modelos, histórico, logs | `~/.cache/talk/` | `%LOCALAPPDATA%\talk\` |
+
+O `config.toml` é relido a cada ditada e tem um comentário em cada chave. A
+janela (Ajustes) edita as chaves sem apagar os comentários; prefira ela.
+
 ## Publicar uma versão
 
 1. Suba a `version` do `Cargo.toml`, faça o commit e crie a tag `vX.Y.Z`.
@@ -65,7 +76,10 @@ Não edite o arquivo de atalhos do COSMIC na mão enquanto a janela está aberta
 ## Desenvolver
 
 - `cargo test --release` e `cargo clippy --release --all-targets`. No Linux,
-  com `CMAKE_CUDA_ARCHITECTURES` da placa.
+  com `CMAKE_CUDA_ARCHITECTURES` da placa. `./scripts/install.sh` instala o
+  que você compilou.
+- `talk-ui --dump <pasta>` gera as telas da janela em HTML, e
+  `talk-pill --png <pasta>` a pílula em PNG: dá para conferir sem abrir nada.
 - No Windows, compile **sempre** pelo `scripts\build-windows.ps1`. Ele carrega
   o Visual Studio, as variáveis do CUDA e as flags de otimização que o cmake-rs
   apaga. Sem elas, o whisper.cpp sai ~2× mais lento.
