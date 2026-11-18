@@ -4,6 +4,13 @@ Ditado por voz 100% local para Linux e Windows. Aperta um atalho, fala, aperta d
 o texto aparece onde o cursor estiver. Nada sai da máquina: sem API key, sem
 nuvem, sem assinatura.
 
+![O talk transcrevendo um ditado em inglês num editor de texto](docs/demo/dog-diary.gif)
+
+*Um ditado de 15 s colado 0,9 s depois de soltar o atalho, numa RTX 3060 de
+notebook. Com som: [dog-diary.mp4](docs/demo/dog-diary.mp4) e
+[note-to-self.mp4](docs/demo/note-to-self.mp4). A voz é sintética (Piper),
+tocada num microfone virtual.*
+
 ```
 atalho → microfone → Silero VAD → Whisper (whisper.cpp, GPU) → vocabulário → cola no cursor
 ```
