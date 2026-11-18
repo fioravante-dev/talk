@@ -9,6 +9,7 @@ use anyhow::{Context, Result};
 use askama::Template;
 use talk_core::config::{self, Config};
 use talk_core::history;
+use talk_core::keys::Combo;
 use talk_core::paths;
 #[cfg(not(windows))]
 use talk_core::shortcuts;
@@ -73,8 +74,13 @@ pub struct ShortcutRow {
     pub label: String,
     pub combo: String,
     pub keys: Vec<String>,
+    /// O que identifica o atalho nas ações: a descrição no COSMIC, o combo
+    /// no Windows. `None`: um atalho que a janela não sabe editar.
     pub description: Option<String>,
     pub language: String,
+    /// As teclas, para o editor. `None` se forem de um tipo que ele não
+    /// escreve (Print, setas...): aí só o idioma muda.
+    pub edit: Option<Combo>,
 }
 
 pub struct ModelChoice {
@@ -109,17 +115,34 @@ pub struct Ajustes {
     /// no Linux, o próprio serviço no Windows.
     pub shortcuts_empty: &'static str,
     pub shortcuts_note: &'static str,
+    /// "Win" no Windows, "Super" no Linux.
+    pub win_label: &'static str,
+    /// Um erro de atalho: de qual (o id, ou "novo") e o quê. O editor dele
+    /// volta aberto, com a mensagem.
+    pub shortcut_error: Option<(String, String)>,
+}
+
+#[cfg(windows)]
+const WIN_LABEL: &str = "Win";
+#[cfg(not(windows))]
+const WIN_LABEL: &str = "Super";
+
+impl Ajustes {
+    /// A mensagem de erro do editor `id`, se for ele.
+    pub fn error_for(&self, id: &str) -> Option<&str> {
+        self.shortcut_error.as_ref().filter(|(i, _)| i == id).map(|(_, m)| m.as_str())
+    }
 }
 
 #[cfg(windows)]
 const SHORTCUTS_EMPTY: &str =
     "Nenhum atalho no [hotkeys] do config.toml. Por exemplo: <code>\"ctrl+alt+d\" = \"auto\"</code>, e reinicie o talk.";
 #[cfg(windows)]
-const SHORTCUTS_NOTE: &str = "O idioma vale no próximo aperto. Teclas novas, no [hotkeys] do config.toml, valem ao reiniciar o talk.";
+const SHORTCUTS_NOTE: &str = "Teclas e idioma valem no próximo aperto. Ficam no [hotkeys] do config.toml.";
 #[cfg(not(windows))]
-const SHORTCUTS_EMPTY: &str = "Nenhum atalho do talk no COSMIC. Cadastre em Configurações → Teclado → Atalhos personalizados, com o comando <code>talk-rs toggle</code>.";
+const SHORTCUTS_EMPTY: &str = "Nenhum atalho do talk no COSMIC ainda: crie um abaixo.";
 #[cfg(not(windows))]
-const SHORTCUTS_NOTE: &str = "O COSMIC aplica a troca no próximo aperto.";
+const SHORTCUTS_NOTE: &str = "Os atalhos ficam no COSMIC (Configurações → Teclado → Atalhos personalizados), que aplica a troca no próximo aperto. Um atalho do sistema com as mesmas teclas vence o do talk.";
 
 const LANGUAGES: [(&str, &str); 3] = [("auto", "detectar"), ("pt", "português"), ("en", "inglês")];
 const KEEP: [(&str, &str); 5] = [("0", "0"), ("30s", "30 s"), ("5m", "5 min"), ("15m", "15 min"), ("never", "sempre")];
@@ -175,6 +198,7 @@ fn shortcut_rows() -> Vec<ShortcutRow> {
                 combo: combo.clone(),
                 language,
                 description: Some(combo.clone()),
+                edit: Combo::parse(combo),
             }
         })
         .collect()
@@ -193,6 +217,7 @@ fn shortcut_rows() -> Vec<ShortcutRow> {
                 keys: b.keys(),
                 combo: b.keys().join("+"),
                 language,
+                edit: b.combo().filter(|_| b.description.is_some()),
                 description: b.description.clone(),
             }
         })
@@ -200,6 +225,10 @@ fn shortcut_rows() -> Vec<ShortcutRow> {
 }
 
 pub fn ajustes() -> Result<String> {
+    ajustes_with(None)
+}
+
+fn ajustes_with(shortcut_error: Option<(String, String)>) -> Result<String> {
     let cfg = Config::load(&paths::config_file())?;
     let models_dir = paths::models_dir();
     let chosen_size = MODELS.iter().find(|m| m.0 == cfg.ggml_model).map_or("2,2 GB", |m| m.3);
@@ -238,6 +267,8 @@ pub fn ajustes() -> Result<String> {
         mics,
         shortcuts_empty: SHORTCUTS_EMPTY,
         shortcuts_note: SHORTCUTS_NOTE,
+        win_label: WIN_LABEL,
+        shortcut_error,
     }
     .render()?)
 }
@@ -276,9 +307,68 @@ pub fn ajustar(what: &str, form: &HashMap<String, String>) -> Result<String> {
                 write_atomic(&path, &new)?;
             }
         }
+        "tecla" | "atalho-novo" | "atalho-remover" => {
+            let id = form.get("atalho").cloned().unwrap_or_default();
+            if let Err(e) = edit_shortcut(what, &id, form) {
+                let id = if what == "atalho-novo" { "novo".to_owned() } else { id };
+                return ajustes_with(Some((id, format!("{e:#}"))));
+            }
+        }
         _ => anyhow::bail!("ajuste inválido: {what}={value}"),
     }
     ajustes()
+}
+
+/// As teclas marcadas no editor.
+fn combo_from(form: &HashMap<String, String>) -> Result<Combo> {
+    let on = |k: &str| form.contains_key(k);
+    Combo::new(on("ctrl"), on("alt"), on("shift"), on("win"), form.get("tecla").map_or("", String::as_str))
+}
+
+/// Troca as teclas, cria ou tira um atalho. No Windows o serviço registra as
+/// teclas de novo e diz se o Windows as aceitou.
+#[cfg(windows)]
+fn edit_shortcut(what: &str, id: &str, form: &HashMap<String, String>) -> Result<()> {
+    let path = paths::config_file();
+    let text = read(&path);
+    let current = Config::parse(&text).unwrap_or_default().hotkeys;
+    let new = match what {
+        "tecla" => config::rename_hotkey(&text, &current, id, &combo_from(form)?)?,
+        "atalho-novo" => config::add_hotkey(&text, &current, &combo_from(form)?, "auto")?,
+        _ => config::remove_hotkey(&text, &current, id)?,
+    };
+    write_atomic(&path, &new)?;
+    system::reload_hotkeys().context("salvo, mas o Windows não aceitou")
+}
+
+#[cfg(not(windows))]
+fn edit_shortcut(what: &str, id: &str, form: &HashMap<String, String>) -> Result<()> {
+    let path = shortcuts::cosmic_file();
+    let text = read(&path);
+    let new = match what {
+        "tecla" | "atalho-novo" => {
+            let combo = combo_from(form)?;
+            let except = (what == "tecla").then_some(id);
+            if shortcuts::taken(&text, &combo, except) {
+                anyhow::bail!("outro atalho do COSMIC já usa essas teclas");
+            }
+            if what == "tecla" {
+                shortcuts::set_keys(&text, id, &combo).context("esse atalho sumiu do COSMIC")?
+            } else {
+                // A descrição identifica o atalho: talk-1, talk-2... a primeira livre.
+                let taken: Vec<_> = shortcuts::parse(&text).into_iter().filter_map(|b| b.description).collect();
+                let desc = (1..).map(|n| format!("talk-{n}")).find(|d| !taken.contains(d)).unwrap_or_default();
+                let exe = std::env::current_exe()?.with_file_name("talk-rs");
+                shortcuts::add(&text, &desc, &combo, &format!("{} toggle -l auto", exe.display()))
+            }
+        }
+        _ => shortcuts::remove(&text, id).context("esse atalho sumiu do COSMIC")?,
+    };
+    // Um backup só, sobrescrito: o arquivo é do COSMIC, não nosso.
+    if !text.is_empty() {
+        std::fs::write(path.with_extension("bak-talk"), &text)?;
+    }
+    write_atomic(&path, &new)
 }
 
 // -------------------------------------------------------------- histórico

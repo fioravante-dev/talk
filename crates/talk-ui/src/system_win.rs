@@ -42,6 +42,22 @@ pub fn status() -> Status {
     }
 }
 
+/// Pede ao serviço que registre as teclas do config de novo. O erro é o que o
+/// Windows recusou (outro programa já usa a tecla, ou ela é do sistema).
+pub fn reload_hotkeys() -> anyhow::Result<()> {
+    let s = UnixStream::connect(paths::socket()).map_err(|_| anyhow::anyhow!("o serviço não está rodando"))?;
+    s.set_read_timeout(Some(Duration::from_secs(4)))?;
+    let mut out = &s;
+    writeln!(out, r#"{{"cmd":"hotkeys"}}"#)?;
+    let mut line = String::new();
+    BufReader::new(&s).read_line(&mut line)?;
+    let v: Value = serde_json::from_str(&line)?;
+    match v["error"].as_str() {
+        Some(e) => anyhow::bail!("{e}"),
+        None => Ok(()),
+    }
+}
+
 pub fn service_mb(st: &Status) -> Option<f64> {
     st.rss_mb
 }

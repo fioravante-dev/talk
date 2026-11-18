@@ -32,6 +32,14 @@ cmd /c "`"$vs\VC\Auxiliary\Build\vcvars64.bat`" >nul && set" | ForEach-Object {
 if (-not $env:LIBCLANG_PATH) { $env:LIBCLANG_PATH = "C:\Program Files\LLVM\bin" }
 $env:CMAKE_CUDA_ARCHITECTURES = if ($env:CUDA_ARCH) { $env:CUDA_ARCH } else { "120" }
 
+# O cmake-rs, com o gerador do Visual Studio, troca o CMAKE_<C|CXX>_FLAGS_RELEASE
+# por "-nologo -MD -Brepro": some o /O2 e o whisper.cpp sai sem otimização
+# (o VAD ficava 12x mais lento que no Linux, a transcrição 2x). Definidas aqui,
+# o whisper-rs-sys as repassa e o cmake-rs não mexe. Mudou isto? Recompile o
+# whisper.cpp: cargo clean -p whisper-rs-sys --release.
+$env:CMAKE_C_FLAGS_RELEASE = "/MD /O2 /Ob2 /DNDEBUG"
+$env:CMAKE_CXX_FLAGS_RELEASE = "/MD /O2 /Ob2 /DNDEBUG"
+
 if ($args.Count -eq 0) { $args = @("build", "--release", "-p", "talk", "-p", "talk-ui", "-p", "talk-pill") }
 # O cargo escreve o progresso no stderr, e o PowerShell 5 com "Stop" trata
 # qualquer linha de stderr de um programa como erro fatal.

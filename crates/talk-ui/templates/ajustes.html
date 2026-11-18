@@ -19,8 +19,46 @@
         <label><input type="radio" name="valor" value="{{ value }}" {% if s.language == *value %}checked{% endif %}><span>{{ label }}</span></label>
         {% endfor %}
       </form>
+      {% if let Some(c) = s.edit %}
+      <details class="keyedit" {% if error_for(desc).is_some() %}open{% endif %}>
+        <summary>trocar teclas</summary>
+        <form hx-post="/ajustes/tecla" aria-label="Teclas do atalho {{ s.combo }}">
+          <input type="hidden" name="atalho" value="{{ desc }}">
+          <div class="caps">
+            <label class="cap"><input type="checkbox" name="ctrl" {% if c.ctrl %}checked{% endif %}><span>Ctrl</span></label>
+            <label class="cap"><input type="checkbox" name="alt" {% if c.alt %}checked{% endif %}><span>Alt</span></label>
+            <label class="cap"><input type="checkbox" name="shift" {% if c.shift %}checked{% endif %}><span>Shift</span></label>
+            <label class="cap"><input type="checkbox" name="win" {% if c.win %}checked{% endif %}><span>{{ win_label }}</span></label>
+            <span class="plus" aria-hidden="true">+</span>
+            <input class="keycap" name="tecla" value="{{ c.key|upper }}" data-keycap autocomplete="off" spellcheck="false" aria-label="Tecla">
+          </div>
+          <p class="hint">Marque as modificadoras e aperte a tecla no quadrado: uma letra, um número ou F1–F24.</p>
+          {% if let Some(e) = error_for(desc) %}<p class="error" role="alert">{{ e }}</p>{% endif %}
+          <div class="actions">
+            <button type="submit">salvar</button>
+            <button type="button" class="quiet" hx-post="/ajustes/atalho-remover" hx-confirm="Remover o atalho {{ s.combo }}?">remover atalho</button>
+          </div>
+        </form>
+      </details>
+      {% endif %}
       {% endif %}
       {% endfor %}
+      <details class="keyedit keyedit-new" {% if error_for("novo").is_some() %}open{% endif %}>
+        <summary>novo atalho</summary>
+        <form hx-post="/ajustes/atalho-novo" aria-label="Novo atalho">
+          <div class="caps">
+            <label class="cap"><input type="checkbox" name="ctrl" checked><span>Ctrl</span></label>
+            <label class="cap"><input type="checkbox" name="alt" checked><span>Alt</span></label>
+            <label class="cap"><input type="checkbox" name="shift"><span>Shift</span></label>
+            <label class="cap"><input type="checkbox" name="win"><span>{{ win_label }}</span></label>
+            <span class="plus" aria-hidden="true">+</span>
+            <input class="keycap" name="tecla" value="" placeholder="?" data-keycap autocomplete="off" spellcheck="false" aria-label="Tecla">
+          </div>
+          <p class="hint">Começa detectando o idioma; troque depois, acima.</p>
+          {% if let Some(e) = error_for("novo") %}<p class="error" role="alert">{{ e }}</p>{% endif %}
+          <div class="actions"><button type="submit">criar</button></div>
+        </form>
+      </details>
       <p class="note">{{ shortcuts_note }}</p>
     </section>
     <section aria-labelledby="h-colar">

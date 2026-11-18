@@ -37,4 +37,28 @@
       seg.classList.toggle("hot", i >= 14 && i < lit);
     });
   }
+
+  // O quadrado da tecla grava o que se aperta nele, em vez de escrever: a
+  // tecla pelo lugar no teclado (e.code), para Alt+D não virar "∂". Apertada
+  // com modificadoras, marca as modificadoras também. Um atalho que já está
+  // registrado nem chega aqui (o sistema o pega antes): por isso as
+  // modificadoras também se marcam à mão.
+  var MODS = { ctrl: "ctrlKey", alt: "altKey", shift: "shiftKey", win: "metaKey" };
+  document.addEventListener("keydown", function (e) {
+    var input = e.target;
+    if (!input.matches || !input.matches("[data-keycap]")) return;
+    if (e.key === "Tab" || e.key === "Enter") return;
+    e.preventDefault();
+    if (e.key === "Backspace" || e.key === "Delete") { input.value = ""; return; }
+    if (e.key === "Escape") { var d = input.closest("details"); if (d) d.open = false; return; }
+    var m = /^(?:Key([A-Z])|Digit(\d)|Numpad(\d)|(F\d{1,2}))$/.exec(e.code);
+    if (!m) return; // uma modificadora sozinha, ou uma tecla que não serve
+    input.value = m[1] || m[2] || m[3] || m[4];
+    if (e.ctrlKey || e.altKey || e.metaKey) {
+      Object.keys(MODS).forEach(function (name) {
+        var box = input.form.querySelector('input[name="' + name + '"]');
+        if (box) box.checked = e[MODS[name]];
+      });
+    }
+  });
 })();

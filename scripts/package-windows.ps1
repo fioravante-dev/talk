@@ -15,6 +15,9 @@ if (-not $env:CUDA_ARCH) { $env:CUDA_ARCH = "75;86;89;120" }
 # placas muda, e o build do dia a dia (só a placa daqui) continua no target\release.
 $env:CARGO_TARGET_DIR = "target\package"
 $ErrorActionPreference = "Continue"
+# O whisper.cpp sempre do zero: o CMake dele não percebe quando só as flags
+# ou a lista de placas mudam, e um pacote com o build velho sairia lento.
+& .\scripts\build-windows.ps1 clean --release -p whisper-rs-sys
 & .\scripts\build-windows.ps1 build --release -p talk -p talk-ui -p talk-pill
 if ($LASTEXITCODE -ne 0) { throw "o build falhou" }
 $ErrorActionPreference = "Stop"

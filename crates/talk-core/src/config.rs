@@ -10,6 +10,8 @@ use std::time::Duration;
 use anyhow::{Context, Result, bail};
 use serde::Deserialize;
 
+use crate::keys::Combo;
+
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(default)]
 pub struct Config {
@@ -115,6 +117,13 @@ pub fn set_key(text: &str, key: &str, value: impl Into<toml_edit::Value>) -> Res
 /// do arquivo. Sem a tabela no arquivo valem os padrões (`current`): eles são
 /// escritos primeiro, para que mexer num atalho não apague o outro.
 pub fn set_hotkey(text: &str, current: &BTreeMap<String, String>, combo: &str, language: &str) -> Result<String> {
+    let mut doc = hotkeys_doc(text, current)?;
+    doc["hotkeys"][combo] = toml_edit::value(language);
+    Ok(doc.to_string())
+}
+
+/// O arquivo com a tabela `[hotkeys]` escrita (os padrões, se ainda não havia).
+fn hotkeys_doc(text: &str, current: &BTreeMap<String, String>) -> Result<toml_edit::DocumentMut> {
     let mut doc: toml_edit::DocumentMut = text.parse().context("config.toml inválido")?;
     if !doc.contains_table("hotkeys") {
         let mut table = toml_edit::Table::new();
@@ -123,12 +132,50 @@ pub fn set_hotkey(text: &str, current: &BTreeMap<String, String>, combo: &str, l
         }
         doc["hotkeys"] = toml_edit::Item::Table(table);
     }
-    doc["hotkeys"][combo] = toml_edit::value(language);
+    Ok(doc)
+}
+
+/// O atalho do `[hotkeys]` que é este combo, escrito de qualquer jeito.
+fn find_hotkey(current: &BTreeMap<String, String>, combo: &Combo) -> Option<String> {
+    current.keys().find(|k| Combo::parse(k).as_ref() == Some(combo)).cloned()
+}
+
+/// Troca as teclas de um atalho, mantendo o idioma. Recusa se outro atalho do
+/// talk já usa essas teclas.
+pub fn rename_hotkey(text: &str, current: &BTreeMap<String, String>, old: &str, new: &Combo) -> Result<String> {
+    let language = current.get(old).cloned().with_context(|| format!("não existe o atalho {old}"))?;
+    if find_hotkey(current, new).is_some_and(|k| k != old) {
+        bail!("outro atalho do talk já usa essas teclas");
+    }
+    let mut doc = hotkeys_doc(text, current)?;
+    if let Some(t) = doc["hotkeys"].as_table_like_mut() {
+        t.remove(old);
+    }
+    doc["hotkeys"][new.to_config().as_str()] = toml_edit::value(language);
+    Ok(doc.to_string())
+}
+
+/// Um atalho novo, em `language`.
+pub fn add_hotkey(text: &str, current: &BTreeMap<String, String>, new: &Combo, language: &str) -> Result<String> {
+    if find_hotkey(current, new).is_some() {
+        bail!("outro atalho do talk já usa essas teclas");
+    }
+    set_hotkey(text, current, &new.to_config(), language)
+}
+
+pub fn remove_hotkey(text: &str, current: &BTreeMap<String, String>, combo: &str) -> Result<String> {
+    let mut doc = hotkeys_doc(text, current)?;
+    if let Some(t) = doc["hotkeys"].as_table_like_mut() {
+        t.remove(combo);
+    }
     Ok(doc.to_string())
 }
 
 /// "ctrl+alt+shift+d" → Ctrl, Alt, Shift, D: como se lê no teclado.
 pub fn hotkey_keys(combo: &str) -> Vec<String> {
+    if let Some(c) = Combo::parse(combo) {
+        return c.labels("Win");
+    }
     combo
         .split('+')
         .map(|k| match k.trim().to_lowercase().as_str() {
@@ -244,5 +291,34 @@ mod tests {
         assert_eq!(parse_duration("1h").unwrap(), Some(Duration::from_secs(3600)));
         assert_eq!(parse_duration("never").unwrap(), None);
         assert!(parse_duration("5 minutos").is_err());
+    }
+
+    #[test]
+    fn hotkeys_change_keys_keeping_the_language() {
+        // Sem [hotkeys] no arquivo: os padrões vão para o arquivo primeiro.
+        let cur: BTreeMap<String, String> =
+            [("ctrl+alt+d", "auto"), ("ctrl+alt+shift+d", "en")].map(|(k, v)| (k.to_owned(), v.to_owned())).into();
+        let text = "# topo\nmodel = \"x\"\n";
+        let new = Combo::parse("ctrl+shift+f9").unwrap();
+        let first = "ctrl+alt+shift+d".to_owned();
+        let out = rename_hotkey(text, &cur, &first, &new).unwrap();
+        let cfg = Config::parse(&out).unwrap();
+        assert!(out.starts_with("# topo"));
+        assert_eq!(cfg.hotkeys.get(&new.to_config()), cur.get(&first));
+        assert!(!cfg.hotkeys.contains_key(&first));
+        assert_eq!(cfg.hotkeys.len(), cur.len(), "o outro atalho continua");
+    }
+
+    #[test]
+    fn hotkeys_add_and_remove() {
+        let mut cur = BTreeMap::new();
+        cur.insert("ctrl+alt+d".to_owned(), "auto".to_owned());
+        let out = add_hotkey("", &cur, &Combo::parse("alt+ctrl+e").unwrap(), "en").unwrap();
+        let cfg = Config::parse(&out).unwrap();
+        assert_eq!(cfg.hotkeys.get("ctrl+alt+e").map(String::as_str), Some("en"));
+        assert!(add_hotkey(&out, &cfg.hotkeys, &Combo::parse("ctrl+alt+d").unwrap(), "pt").is_err(), "repetido");
+        assert!(rename_hotkey(&out, &cfg.hotkeys, "ctrl+alt+e", &Combo::parse("alt+ctrl+d").unwrap()).is_err());
+        let out = remove_hotkey(&out, &cfg.hotkeys, "ctrl+alt+d").unwrap();
+        assert_eq!(Config::parse(&out).unwrap().hotkeys.len(), 1);
     }
 }

@@ -370,6 +370,24 @@ impl Service {
                 rss_mb: memory_stats::memory_stats().map(|m| m.physical_mem as f64 / 1_048_576.0),
                 ..Reply::default()
             },
+            // A janela mudou as teclas no config: no Windows elas são do
+            // serviço e precisam ser registradas de novo (no Linux, do COSMIC,
+            // que relê o arquivo sozinho).
+            "hotkeys" => {
+                #[cfg(windows)]
+                let done = crate::hotkeys::reload();
+                #[cfg(not(windows))]
+                let done: Result<()> = Ok(());
+                match done {
+                    Ok(()) => Reply { ok: true, phase: lock(&self.phase).name().into(), ..Reply::default() },
+                    Err(e) => Reply {
+                        ok: false,
+                        phase: lock(&self.phase).name().into(),
+                        error: Some(format!("{e:#}")),
+                        ..Reply::default()
+                    },
+                }
+            }
             "subscribe" => {
                 // A conexão fica aberta: daqui em diante ela recebe os eventos.
                 let mut out = &stream;
@@ -521,7 +539,7 @@ pub fn serve() -> Result<()> {
     });
     service.reap();
     #[cfg(windows)]
-    crate::hotkeys::spawn(service.clone(), &Config::load(&paths::config_file()).unwrap_or_default());
+    crate::hotkeys::spawn(service.clone());
 
     // A janela sobe já, escondida: o WebView2 leva ~1 s para acordar a frio,
     // e assim abrir pela bandeja é só mostrar.

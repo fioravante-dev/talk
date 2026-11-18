@@ -14,7 +14,8 @@ use anyhow::{Context, Result, bail};
 use clap::Parser;
 use serde_json::json;
 use whisper_rs::{
-    FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters, get_lang_str,
+    FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters, WhisperVadContext,
+    WhisperVadContextParams, WhisperVadParams, get_lang_str,
 };
 
 #[derive(Parser, Debug)]
@@ -30,6 +31,9 @@ struct Args {
     prompt: String,
     #[arg(long, default_value_t = 5)]
     beam_size: i32,
+    /// O modelo do Silero VAD: mede também o VAD (na CPU, como o trabalhador).
+    #[arg(long)]
+    vad: Option<PathBuf>,
     /// Os WAVs, 16 kHz mono 16 bits, como o talk grava.
     wavs: Vec<PathBuf>,
 }
@@ -57,12 +61,26 @@ fn main() -> Result<()> {
     let mut state = ctx.create_state()?;
     let load_s = started.elapsed().as_secs_f64();
 
+    let mut vad_total = 0.0;
     let mut stt_total = 0.0;
     let mut audio_total = 0.0;
     let mut first_text_s = None;
     for wav in &args.wavs {
         let audio = read_wav(wav)?;
         let audio_s = audio.len() as f64 / 16_000.0;
+        // O VAD como o trabalhador roda: contexto novo, uma thread. Só mede.
+        let vad_s = match &args.vad {
+            Some(path) => {
+                let t = Instant::now();
+                let mut cp = WhisperVadContextParams::new();
+                cp.set_n_threads(1);
+                let mut vad = WhisperVadContext::new(path.to_str().context("VAD não é UTF-8")?, cp)?;
+                let _ = vad.segments_from_samples(WhisperVadParams::new(), &audio)?.count();
+                t.elapsed().as_secs_f64()
+            }
+            None => 0.0,
+        };
+        vad_total += vad_s;
 
         let mut full = FullParams::new(SamplingStrategy::BeamSearch {
             beam_size: args.beam_size,
@@ -99,6 +117,7 @@ fn main() -> Result<()> {
                 "file": wav.file_name().and_then(|n| n.to_str()),
                 "audio_s": audio_s,
                 "stt_s": stt_s,
+                "vad_s": vad_s,
                 "language": lang,
                 "text": text,
             })
@@ -116,6 +135,7 @@ fn main() -> Result<()> {
             "files": args.wavs.len(),
             "audio_s": audio_total,
             "stt_s": stt_total,
+            "vad_s": vad_total,
         })
     );
     Ok(())

@@ -224,3 +224,36 @@ button.quiet:hover { background: var(--well); color: var(--ink); }
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; animation: none !important; }
 }
+
+/* atalhos: o editor abre sob o atalho, e as modificadoras são teclas que
+   afundam (marcadas, preenchidas) */
+.keyedit { margin: 0 0 10px; }
+.keyedit summary {
+  display: inline-block; list-style: none; cursor: pointer; font-size: 12px; font-weight: 500;
+  color: var(--ink2); padding: 3px 8px; margin-left: -8px; border-radius: var(--r);
+}
+.keyedit summary::-webkit-details-marker { display: none; }
+.keyedit summary:hover { background: var(--well); color: var(--ink); }
+.keyedit[open] summary { color: var(--ink); }
+.keyedit form { padding: 10px 0 4px; }
+.keyedit-new { margin-top: 6px; }
+.caps { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.cap { position: relative; cursor: pointer; }
+.cap input { position: absolute; opacity: 0; inset: 0; cursor: pointer; }
+.cap span {
+  display: block; font-size: 13px; font-weight: 500; padding: 5px 11px; background: var(--plate);
+  border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px; transition: background .12s, color .12s;
+}
+.cap:hover span { border-color: var(--ink2); }
+.cap input:checked + span { background: var(--ink); color: var(--plate); border-color: var(--ink); }
+.cap input:focus-visible + span { outline: 2px solid var(--focus); outline-offset: 2px; }
+.plus { color: var(--ink3); padding: 0 2px; }
+input.keycap {
+  width: 52px; font: 600 13px "Schibsted Grotesk", sans-serif; color: var(--ink); text-align: center;
+  text-transform: uppercase; caret-color: transparent; background: var(--plate); padding: 5px 0;
+  border: 1px solid var(--ink); border-bottom-width: 2px; border-radius: 4px;
+}
+input.keycap:focus { outline: none; box-shadow: 0 0 0 1px var(--ink); }
+input.keycap:placeholder-shown { border-style: dashed; }
+.hint { font-size: 12px; color: var(--ink3); margin-top: 8px; }
+.keyedit .actions { display: flex; gap: 8px; align-items: center; margin-top: 10px; }

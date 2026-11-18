@@ -12,6 +12,23 @@ Escrito em Rust. Em repouso o serviço ocupa ~100 MB de RAM e nenhuma VRAM: o
 modelo só carrega quando você aperta o atalho, enquanto você fala, e sai da GPU
 depois de ocioso.
 
+## Instalação rápida
+
+Um comando, do zero até o serviço rodando (pode rodar de novo para atualizar):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/fioravante-dev/talk/main/scripts/install.sh | bash
+```
+
+```powershell
+irm https://raw.githubusercontent.com/fioravante-dev/talk/main/scripts/install.ps1 | iex
+```
+
+Para instalar com um agente de IA, peça: *"instale o talk seguindo o
+AGENTS.md de github.com/fioravante-dev/talk"*. O [AGENTS.md](AGENTS.md) diz o
+que ele precisa saber: a placa, o sudo/UAC, os 10 minutos de compilação. Os
+passos manuais estão abaixo.
+
 ## As peças
 
 | binário | o que é | quando existe |
@@ -61,7 +78,9 @@ também baixa os modelos e liga o início no login. Os atalhos:
 | `Ctrl+Alt+D` | dita, detectando o idioma |
 | `Ctrl+Alt+Shift+D` | dita em inglês |
 
-Eles ficam no `[hotkeys]` do config e mudam nos Ajustes. O ícone na bandeja
+As teclas e o idioma de cada atalho mudam nos Ajustes, e lá também se criam
+outros. Valem no aperto seguinte, sem reiniciar. Ficam no `[hotkeys]` do
+config; editado à mão, `talk-rs hotkeys` registra de novo. O ícone na bandeja
 também começa e termina a ditada. Para desligar o início no login:
 `& "$env:LOCALAPPDATA\Programs\talk\talk-rs.exe" autostart off`.
 
@@ -122,7 +141,8 @@ Exec=sh -c "exec $HOME/.local/bin/talk-rs serve >>$HOME/.cache/talk/talk-rs-serv
 NoDisplay=true
 ```
 
-E os atalhos, no COSMIC em Configurações → Teclado → Atalhos personalizados:
+Os atalhos, no COSMIC, se criam e se trocam na janela (Ajustes → atalhos).
+Eles vão para os atalhos personalizados do COSMIC, assim:
 
 | tecla | comando |
 |---|---|

@@ -52,6 +52,10 @@ enum Cmd {
     },
     /// Em que fase o serviço está.
     Status,
+    /// Só no Windows: registra de novo os atalhos do `[hotkeys]` do config,
+    /// depois de editá-lo à mão (a janela já faz isso sozinha).
+    #[cfg(windows)]
+    Hotkeys,
     /// Interno: o processo que transcreve.
     #[command(hide = true)]
     Worker {
@@ -74,6 +78,15 @@ fn main() -> Result<()> {
                 bail!("{e}");
             }
             println!("{}", reply.phase);
+            Ok(())
+        }
+        #[cfg(windows)]
+        Cmd::Hotkeys => {
+            let reply = service::request(&service::Request { cmd: "hotkeys".into(), language: None })?;
+            if let Some(e) = reply.error {
+                bail!("{e}");
+            }
+            println!("atalhos registrados");
             Ok(())
         }
         Cmd::Status => {
