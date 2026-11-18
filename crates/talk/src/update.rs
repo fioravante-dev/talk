@@ -161,6 +161,8 @@ fn spawn_powershell(script: &str) -> Result<()> {
 /// O aviso de falha, pelo próprio PowerShell (o serviço já pode ter saído).
 #[cfg(windows)]
 const PS_FAIL: &str = r#"
+# A saída vai para o update.log: em UTF-8, como o resto do talk.
+[Console]::OutputEncoding = [Text.Encoding]::UTF8
 function Falhou($msg) {
     Write-Host "falhou: $msg"
     [Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] | Out-Null
