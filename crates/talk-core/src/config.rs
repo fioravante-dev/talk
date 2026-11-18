@@ -36,6 +36,9 @@ pub struct Config {
     /// próprio serviço registra as teclas: `"ctrl+alt+d" = "auto"`, uma tecla
     /// por idioma. No Linux quem cuida é o COSMIC (ver `shortcuts`).
     pub hotkeys: BTreeMap<String, String>,
+    /// `ask` avisa da versão nova e espera o clique; `auto` atualiza sozinho
+    /// quando o talk está parado; `off` nem procura.
+    pub update: String,
 }
 
 /// O Super+D é do Windows (mostra a área de trabalho) e não pode ser registrado.
@@ -62,6 +65,7 @@ impl Default for Config {
             to: "auto".into(),
             input_device: String::new(),
             hotkeys: default_hotkeys(),
+            update: "ask".into(),
         }
     }
 }

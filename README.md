@@ -166,6 +166,7 @@ relido a cada ditada:
 | `input_device` | vazio | o `node.name` do microfone no PipeWire (no Windows, o nome do dispositivo); vazio é o padrão do sistema |
 | `[hotkeys]` | só no Windows | `"ctrl+alt+d" = "auto"`: o atalho e o idioma dele |
 | `to` | `auto` | `clipboard` só copia; `stdout` só registra no log |
+| `update` | `ask` | `ask` avisa da versão nova; `auto` atualiza sozinho com o talk parado; `off` nem procura |
 
 A janela (`talk-ui`, ou "Abrir talk" na bandeja) edita essas chaves sem apagar
 os comentários do arquivo.
@@ -182,6 +183,31 @@ Wayland = Weylend, Uêilend    a dica, e essas grafias viram "Wayland"
 Os termos viram o `initial_prompt` do Whisper, que guarda só os últimos ~224
 tokens: o `vocab` do config vai na frente e os termos do arquivo por último.
 Troca só grafias que nunca são palavras de verdade.
+
+## Atualização
+
+Uma vez por dia o talk olha a última release no GitHub. Quando há versão
+nova, ele avisa, e a bandeja ganha **Atualizar para x.y.z** (também em
+Ajustes → versão, ou `talk-rs update`). O serviço segue ditando enquanto a
+atualização trabalha, e reinicia sozinho no fim.
+
+- **Linux, e Windows instalado pelo `install.ps1`:** `git pull` no código de
+  onde o talk foi instalado e o instalador de novo, que recompila só o que
+  mudou, para a placa daqui. O CUDA, o whisper.cpp já compilado e o modelo
+  ficam. Se faltar algum pacote novo, ele não pede senha: avisa para rodar o
+  instalador num terminal.
+- **Windows instalado pelo `talk-setup`:** se o cuBLAS instalado é do mesmo
+  CUDA da release, baixa só os programas (`talk-app-<versão>-cuda<N>.zip`);
+  senão, o instalador inteiro, em modo silencioso. Os dois são conferidos
+  pelo `.sha256` antes de instalar.
+
+```bash
+talk-rs --version          # a versão e o commit: "0.3.0 (7a77b72)"
+talk-rs update --check     # só procura
+talk-rs update             # atualiza
+```
+
+O registro fica em `~/.cache/talk/update.log` (no Windows, `%LOCALAPPDATA%\talk\update.log`).
 
 ## Desenvolvimento
 

@@ -11,6 +11,8 @@
 # Variáveis: TALK_DIR (onde fica o código, padrão ~/.local/src/talk),
 # CUDA_ARCH (padrão: a da placa, pelo nvidia-smi), TALK_MODEL=turbo para o
 # modelo mais rápido (1,3 GB) em vez do large-v3 q5 (1,1 GB, mais preciso).
+# TALK_UPDATE=1 é o modo da atualização pela bandeja (`talk-rs update`): roda
+# sem terminal, então nunca pede sudo, e avisa no fim por notificação.
 
 set -euo pipefail
 
@@ -42,6 +44,9 @@ if command -v apt-get >/dev/null; then
     for p in libclang-dev libwebkit2gtk-4.1-dev libgtk-3-dev libgtk-layer-shell-dev; do
         dpkg -s "$p" >/dev/null 2>&1 || missing+=("$p")
     done
+    if ((${#missing[@]})) && [[ -n "${TALK_UPDATE:-}" ]]; then
+        die "faltam pacotes (${missing[*]}): rode o scripts/install.sh num terminal"
+    fi
     if ((${#missing[@]})); then
         say "instalando: ${missing[*]}"
         sudo apt-get update -qq && sudo apt-get install -y "${missing[@]}"
@@ -90,14 +95,18 @@ else
 fi
 
 # 7. O teclado virtual escreve no /dev/uinput.
-if ! getfacl -p /dev/uinput 2>/dev/null | grep -q "^user:$USER:"; then
+if [[ -n "${TALK_UPDATE:-}" ]]; then
+    : # a permissão veio na instalação; a atualização não pede sudo
+elif ! getfacl -p /dev/uinput 2>/dev/null | grep -q "^user:$USER:"; then
     say "dando permissão ao /dev/uinput (sudo)"
     echo 'KERNEL=="uinput", MODE="0660", TAG+="uaccess"' | sudo tee /etc/udev/rules.d/80-uinput.rules >/dev/null
     sudo udevadm control --reload-rules && sudo udevadm trigger
 fi
 
-# 8. Sobe no login.
+# 8. Sobe no login, e anota de onde veio: é daqui que o `talk-rs update` puxa.
 mkdir -p "$HOME/.config/autostart" "$HOME/.cache/talk"
+printf "# Escrito pelo scripts/install.sh: de onde o talk-rs update puxa e recompila.\nsrc = '%s'\ncuda_arch = '%s'\n" \
+    "$src" "$CUDA_ARCH" >"$HOME/.cache/talk/install.toml"
 cat >"$HOME/.config/autostart/talk-rs.desktop" <<EOF
 [Desktop Entry]
 Type=Application
@@ -122,5 +131,8 @@ else
 fi
 sleep 2
 "$BIN/talk-rs" status >/dev/null || die "o serviço não subiu: veja ~/.cache/talk/talk-rs-serve.log"
-say "pronto: talk-rs rodando, na bandeja e no próximo login."
+if [[ -n "${TALK_UPDATE:-}" ]]; then
+    notify-send -a talk "talk atualizado" "$("$BIN/talk-rs" --version)" || true
+fi
+say "pronto: $("$BIN/talk-rs" --version), na bandeja e no próximo login."
 say "atalhos: abra o talk (bandeja → Abrir talk) → Ajustes → novo atalho; ou teste agora com: talk-rs toggle"

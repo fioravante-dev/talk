@@ -38,4 +38,17 @@ $iscc = @("$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe", "${env:ProgramFile
 if (-not $iscc) { throw "Inno Setup 6 não encontrado (winget install JRSoftware.InnoSetup)" }
 $ErrorActionPreference = "Continue"
 & $iscc /Qp "/DVersion=$version" "/DDist=..\$dist" scripts\talk.iss
-exit $LASTEXITCODE
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+$ErrorActionPreference = "Stop"
+
+# A atualização de quem já tem o talk: só os executáveis, sem o cuBLAS, que
+# fica o mesmo enquanto o CUDA não muda de versão (o nome do pacote diz qual;
+# com outro CUDA, o talk-rs update baixa o instalador inteiro).
+$cudaMajor = (Get-ChildItem $dist -Filter "cublas64_*.dll" | Select-Object -First 1).BaseName -replace "cublas64_", ""
+$app = "$dist\talk-app-$version-cuda$cudaMajor.zip"
+Compress-Archive -Path "$dist\talk-rs.exe", "$dist\talk-start.exe", "$dist\talk-ui.exe", "$dist\talk-pill.exe" -DestinationPath $app -Force
+foreach ($f in $app, "$dist\talk-setup-$version.exe") {
+    $hash = (Get-FileHash $f -Algorithm SHA256).Hash.ToLower()
+    [IO.File]::WriteAllText("$f.sha256", "$hash  $(Split-Path $f -Leaf)`n")
+}
+Get-ChildItem $dist -Filter "talk-*" | Select-Object Name, @{n = "MB"; e = { [math]::Round($_.Length / 1MB) } }

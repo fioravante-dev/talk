@@ -21,6 +21,7 @@ pub enum Action {
     Toggle,
     Open,
     CopyLast,
+    Update,
     Quit,
 }
 
@@ -28,6 +29,8 @@ pub enum Action {
 pub struct Tray {
     pub look: Look,
     pub tooltip: String,
+    /// A versão nova que espera: aparece "Atualizar para ..." no menu.
+    pub update: Option<String>,
     pub actions: Sender<Action>,
 }
 
@@ -81,12 +84,16 @@ impl ksni::Tray for Tray {
             .into()
         };
         let toggle = if matches!(self.look, Look::Recording { .. }) { "Parar e colar" } else { "Ditar" };
-        vec![
+        let mut menu = vec![
             item(toggle, Action::Toggle),
             item("Abrir talk", Action::Open),
             item("Copiar a última ditada", Action::CopyLast),
             MenuItem::Separator,
-            item("Sair", Action::Quit),
-        ]
+        ];
+        if let Some(v) = &self.update {
+            menu.push(item(&format!("Atualizar para {v}"), Action::Update));
+        }
+        menu.push(item("Sair", Action::Quit));
+        menu
     }
 }

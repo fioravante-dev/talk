@@ -20,6 +20,7 @@ use anyhow::{Context, Result, anyhow, bail};
 use serde::{Deserialize, Serialize};
 use talk_core::config::Config;
 use talk_core::vocab::Vocab;
+use talk_core::update::State as UpdateState;
 use talk_core::{history, paths, wire::Job};
 #[cfg(windows)]
 use uds_windows::{UnixListener, UnixStream};
@@ -147,6 +148,59 @@ impl Service {
                 t.tooltip = tooltip;
             });
         }
+    }
+
+    /// Mostra a versão nova na bandeja e avisa, uma vez por versão.
+    fn offer_update(&self) {
+        let mut state = UpdateState::load();
+        let available = state.available().map(str::to_owned);
+        if let Some(h) = lock(&self.tray).as_ref() {
+            h.update(|t| t.update.clone_from(&available));
+        }
+        let Some(v) = available else { return };
+        if state.notified.as_deref() != Some(v.as_str()) {
+            notify(&format!("talk {v} disponível"), "Para atualizar: bandeja → Atualizar.");
+            state.notified = Some(v);
+            let _ = state.save();
+        }
+    }
+
+    /// Começa a atualização numa thread: no Windows o download leva um tempo,
+    /// e o serviço segue ditando até a troca.
+    fn start_update(&self) {
+        thread::spawn(|| {
+            notify("Atualizando o talk", "Em segundo plano; dá para seguir ditando.");
+            match crate::update::apply() {
+                Ok(msg) => notify("Atualizando o talk", &msg),
+                Err(e) => notify("⚠ O talk não atualizou", &format!("{e:#}")),
+            }
+        });
+    }
+
+    /// Uma olhada por dia no GitHub (a primeira, um minuto depois de subir),
+    /// a não ser que o config diga `update = "off"`.
+    fn watch_updates(self: &Arc<Self>) {
+        let me = self.clone();
+        thread::spawn(move || {
+            thread::sleep(Duration::from_secs(60));
+            loop {
+                let cfg = Config::load(&paths::config_file()).unwrap_or_default();
+                if cfg.update != "off" {
+                    if UpdateState::load().due(crate::update::now())
+                        && let Err(e) = crate::update::check()
+                    {
+                        eprintln!("[talk] atualização: {e:#}");
+                    }
+                    me.offer_update();
+                    let st = UpdateState::load();
+                    let idle = matches!(*lock(&me.phase), Phase::Idle);
+                    if cfg.update == "auto" && idle && st.available().is_some() && st.tried.as_deref() != st.available() {
+                        me.start_update();
+                    }
+                }
+                thread::sleep(Duration::from_secs(3600));
+            }
+        });
     }
 
     /// Sobe o trabalhador se não houver um vivo com o modelo certo. Volta logo:
@@ -388,6 +442,15 @@ impl Service {
                     },
                 }
             }
+            // Alguém (a janela, o `talk-rs update --check`) procurou: a bandeja acompanha.
+            "update-refresh" => {
+                self.offer_update();
+                Reply { ok: true, phase: lock(&self.phase).name().into(), ..Reply::default() }
+            }
+            "update" => {
+                self.start_update();
+                Reply { ok: true, phase: lock(&self.phase).name().into(), ..Reply::default() }
+            }
             "subscribe" => {
                 // A conexão fica aberta: daqui em diante ela recebe os eventos.
                 let mut out = &stream;
@@ -492,7 +555,12 @@ pub fn serve() -> Result<()> {
     let me = service.clone();
     thread::spawn(move || {
         for attempt in 0u32.. {
-            match (Tray { look: Look::Idle, tooltip: "pronto".into(), actions: tx.clone() }).spawn() {
+            match (Tray {
+                look: Look::Idle,
+                tooltip: "pronto".into(),
+                update: UpdateState::load().available().map(str::to_owned),
+                actions: tx.clone(),
+            }).spawn() {
                 Ok(h) => {
                     if attempt > 0 {
                         eprintln!("[talk] bandeja de pé (tentativa {})", attempt + 1);
@@ -529,6 +597,7 @@ pub fn serve() -> Result<()> {
                         let _ = output::copy(&last);
                     }
                 }
+                Action::Update => me.start_update(),
                 Action::Quit => {
                     eprintln!("[talk] saindo (pela bandeja)");
                     let _ = std::fs::remove_file(paths::socket());
@@ -538,6 +607,7 @@ pub fn serve() -> Result<()> {
         }
     });
     service.reap();
+    service.watch_updates();
     #[cfg(windows)]
     crate::hotkeys::spawn(service.clone());
 

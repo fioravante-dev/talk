@@ -3220,7 +3220,7 @@ dependencies = [
 
 [[package]]
 name = "talk"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "arboard",
@@ -3234,6 +3234,7 @@ dependencies = [
  "notify-rust",
  "serde",
  "serde_json",
+ "sha2",
  "talk-core",
  "tao",
  "tray-icon",
@@ -3245,7 +3246,7 @@ dependencies = [
 
 [[package]]
 name = "talk-bench"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -3256,7 +3257,7 @@ dependencies = [
 
 [[package]]
 name = "talk-core"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -3270,7 +3271,7 @@ dependencies = [
 
 [[package]]
 name = "talk-pill"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "ab_glyph",
  "anyhow",
@@ -3286,7 +3287,7 @@ dependencies = [
 
 [[package]]
 name = "talk-ui"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "arboard",

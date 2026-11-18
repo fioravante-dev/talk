@@ -28,6 +28,7 @@ pub enum Action {
     Toggle,
     Open,
     CopyLast,
+    Update,
     Quit,
 }
 
@@ -35,6 +36,8 @@ pub enum Action {
 pub struct Tray {
     pub look: Look,
     pub tooltip: String,
+    /// A versão nova que espera: aparece "Atualizar para ..." no menu.
+    pub update: Option<String>,
     pub actions: Sender<Action>,
 }
 
@@ -43,6 +46,7 @@ pub struct Tray {
 struct Paint {
     look: Look,
     tooltip: String,
+    update: Option<String>,
 }
 
 /// O lado do serviço: guarda o estado e avisa a thread do ícone a cada mudança.
@@ -56,7 +60,7 @@ impl Handle<Tray> {
     pub fn update(&self, f: impl FnOnce(&mut Tray)) {
         let mut t = self.state.lock().unwrap_or_else(PoisonError::into_inner);
         f(&mut t);
-        let _ = self.proxy.send_event(Paint { look: t.look, tooltip: t.tooltip.clone() });
+        let _ = self.proxy.send_event(Paint { look: t.look, tooltip: t.tooltip.clone(), update: t.update.clone() });
     }
 }
 
@@ -103,10 +107,13 @@ impl TrayMethods for Tray {
     fn spawn(self) -> Result<Handle<Self>, String> {
         let (ready_tx, ready_rx) = mpsc::channel::<Result<EventLoopProxy<Paint>, String>>();
         let actions = self.actions.clone();
-        let first = Paint { look: self.look, tooltip: self.tooltip.clone() };
+        let first = Paint { look: self.look, tooltip: self.tooltip.clone(), update: self.update.clone() };
         std::thread::spawn(move || {
             let event_loop = EventLoopBuilder::<Paint>::with_user_event().with_any_thread(true).build();
             let toggle = MenuItem::with_id("toggle", "Ditar", true, None);
+            // Entra no menu (antes do "Sair") só quando há versão nova.
+            let update = MenuItem::with_id("update", "Atualizar", true, None);
+            let mut update_shown = false;
             let menu = Menu::new();
             let built = menu
                 .append_items(&[
@@ -121,7 +128,7 @@ impl TrayMethods for Tray {
                     TrayIconBuilder::new()
                         .with_icon(icon_for(first.look))
                         .with_tooltip(format!("talk: {}", first.tooltip))
-                        .with_menu(Box::new(menu))
+                        .with_menu(Box::new(menu.clone()))
                         .with_menu_on_left_click(false)
                         .build()
                         .map_err(|e| e.to_string())
@@ -140,6 +147,7 @@ impl TrayMethods for Tray {
                     "toggle" => Action::Toggle,
                     "open" => Action::Open,
                     "copy" => Action::CopyLast,
+                    "update" => Action::Update,
                     "quit" => Action::Quit,
                     _ => return,
                 };
@@ -167,6 +175,17 @@ impl TrayMethods for Tray {
                     }
                     let _ = tray.set_tooltip(Some(format!("talk: {}", p.tooltip)));
                     toggle.set_text(if matches!(p.look, Look::Recording { .. }) { "Parar e colar" } else { "Ditar" });
+                    match &p.update {
+                        Some(v) => {
+                            update.set_text(format!("Atualizar para {v}"));
+                            // 4 = depois de ditar, abrir, copiar e o separador.
+                            if !update_shown && menu.insert(&update, 4).is_ok() {
+                                update_shown = true;
+                            }
+                        }
+                        None if update_shown && menu.remove(&update).is_ok() => update_shown = false,
+                        None => {}
+                    }
                 }
             });
         });

@@ -3,6 +3,7 @@
 //!     talk-rs serve            o serviço (bandeja, atalhos, colagem)
 //!     talk-rs toggle [-l pt]   o que o atalho chama: começa ou termina a ditada
 //!     talk-rs status
+//!     talk-rs update [--check]
 
 // Cada peça que conversa com o sistema tem um arquivo por plataforma, com a
 // mesma cara: o Linux fica como sempre foi, e o Windows soma ao lado.
@@ -16,12 +17,13 @@ mod output;
 mod service;
 #[cfg_attr(windows, path = "tray_win.rs")]
 mod tray;
+mod update;
 mod worker;
 
 use std::path::PathBuf;
 
 use anyhow::{Result, bail};
-use clap::{Parser, Subcommand};
+use clap::{CommandFactory, FromArgMatches, Parser, Subcommand};
 
 #[derive(Parser, Debug)]
 #[command(name = "talk-rs", about = "Ditado por voz local: atalho, Whisper na GPU, texto no cursor")]
@@ -52,6 +54,12 @@ enum Cmd {
     },
     /// Em que fase o serviço está.
     Status,
+    /// Atualiza para a última versão publicada; o talk reinicia sozinho.
+    Update {
+        /// Só procura e diz se há versão nova.
+        #[arg(long)]
+        check: bool,
+    },
     /// Só no Windows: registra de novo os atalhos do `[hotkeys]` do config,
     /// depois de editá-lo à mão (a janela já faz isso sozinha).
     #[cfg(windows)]
@@ -65,7 +73,11 @@ enum Cmd {
 }
 
 fn main() -> Result<()> {
-    match Cli::parse().cmd {
+    // A versão com o commit: duas máquinas na mesma versão podem rodar códigos diferentes.
+    let matches = Cli::command().version(&*String::leak(talk_core::update::version_line())).get_matches();
+    let cli = Cli::from_arg_matches(&matches).unwrap_or_else(|e| e.exit());
+    match cli.cmd {
+        Cmd::Update { check } => run_update(check),
         Cmd::Serve => service::serve(),
         #[cfg(windows)]
         Cmd::Start => service::start_detached(),
@@ -95,4 +107,25 @@ fn main() -> Result<()> {
             Ok(())
         }
     }
+}
+
+fn run_update(check: bool) -> Result<()> {
+    use talk_core::update::VERSION;
+    let ask = |cmd: &str| service::request(&service::Request { cmd: cmd.into(), language: None });
+    if check {
+        let state = update::check()?;
+        let _ = ask("update-refresh");
+        match state.available() {
+            Some(v) => println!("{v} disponível (esta é a {VERSION}): talk-rs update"),
+            None => println!("em dia: {}", talk_core::update::version_line()),
+        }
+        return Ok(());
+    }
+    // Com o serviço de pé, ele mesmo atualiza (e avisa no fim); sem, aqui.
+    if ask("update").is_ok_and(|r| r.ok) {
+        println!("atualizando em segundo plano; o talk avisa e reinicia sozinho");
+        return Ok(());
+    }
+    println!("{}", update::apply()?);
+    Ok(())
 }

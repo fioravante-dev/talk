@@ -11,6 +11,7 @@ use talk_core::config::{self, Config};
 use talk_core::history;
 use talk_core::keys::Combo;
 use talk_core::paths;
+use talk_core::update::{self, Method};
 #[cfg(not(windows))]
 use talk_core::shortcuts;
 use talk_core::vocab::{self, Entry, Vocab};
@@ -120,6 +121,14 @@ pub struct Ajustes {
     /// Um erro de atalho: de qual (o id, ou "novo") e o quê. O editor dele
     /// volta aberto, com a mensagem.
     pub shortcut_error: Option<(String, String)>,
+    pub version: String,
+    pub update_mode: String,
+    pub update_modes: Vec<(&'static str, &'static str)>,
+    /// A versão nova que espera, se houver.
+    pub update_available: Option<String>,
+    /// O que aconteceu no último clique (procurar, atualizar), ou o último erro.
+    pub update_message: Option<String>,
+    pub update_note: String,
 }
 
 #[cfg(windows)]
@@ -143,6 +152,8 @@ const SHORTCUTS_NOTE: &str = "Teclas e idioma valem no próximo aperto. Ficam no
 const SHORTCUTS_EMPTY: &str = "Nenhum atalho do talk no COSMIC ainda: crie um abaixo.";
 #[cfg(not(windows))]
 const SHORTCUTS_NOTE: &str = "Os atalhos ficam no COSMIC (Configurações → Teclado → Atalhos personalizados), que aplica a troca no próximo aperto. Um atalho do sistema com as mesmas teclas vence o do talk.";
+
+const UPDATE_MODES: [(&str, &str); 3] = [("ask", "avisar"), ("auto", "sozinho"), ("off", "nunca")];
 
 const LANGUAGES: [(&str, &str); 3] = [("auto", "detectar"), ("pt", "português"), ("en", "inglês")];
 const KEEP: [(&str, &str); 5] = [("0", "0"), ("30s", "30 s"), ("5m", "5 min"), ("15m", "15 min"), ("never", "sempre")];
@@ -225,10 +236,39 @@ fn shortcut_rows() -> Vec<ShortcutRow> {
 }
 
 pub fn ajustes() -> Result<String> {
-    ajustes_with(None)
+    ajustes_with(None, None)
 }
 
-fn ajustes_with(shortcut_error: Option<(String, String)>) -> Result<String> {
+/// Como a atualização acontece aqui, e quando o talk olhou por último.
+fn update_note(state: &update::State) -> String {
+    let how = match update::method() {
+        Method::Source(_) => "Atualizar puxa o código novo e recompila para a sua placa: alguns minutos, sem baixar o modelo de novo.",
+        Method::Package => "Atualizar baixa só os programas; o CUDA e o modelo instalados ficam.",
+        Method::Manual => "Para atualizar, rode o scripts/install.sh de novo.",
+    };
+    let when = chrono::DateTime::from_timestamp(state.checked, 0)
+        .map(|t| t.with_timezone(&chrono::Local))
+        .filter(|_| state.checked > 0)
+        .map_or(String::new(), |t| format!(" Olhou por último em {}.", t.format("%d/%m, %H:%M")));
+    format!("{how}{when}")
+}
+
+/// O `talk-rs` ao lado desta janela.
+fn talk_rs(args: &[&str]) -> Result<String> {
+    let exe = std::env::current_exe()?.with_file_name(format!("talk-rs{}", std::env::consts::EXE_SUFFIX));
+    let mut cmd = std::process::Command::new(&exe);
+    cmd.args(args);
+    #[cfg(windows)]
+    std::os::windows::process::CommandExt::creation_flags(&mut cmd, 0x0800_0000);
+    let out = cmd.output().with_context(|| format!("não deu para rodar {}", exe.display()))?;
+    if !out.status.success() {
+        let err = String::from_utf8_lossy(&out.stderr);
+        anyhow::bail!("{}", err.trim().trim_start_matches("Error: "));
+    }
+    Ok(String::from_utf8_lossy(&out.stdout).trim().to_owned())
+}
+
+fn ajustes_with(shortcut_error: Option<(String, String)>, update_message: Option<String>) -> Result<String> {
     let cfg = Config::load(&paths::config_file())?;
     let models_dir = paths::models_dir();
     let chosen_size = MODELS.iter().find(|m| m.0 == cfg.ggml_model).map_or("2,2 GB", |m| m.3);
@@ -254,6 +294,7 @@ fn ajustes_with(shortcut_error: Option<(String, String)>) -> Result<String> {
         label: m.description,
     }));
     let idx = keep_index(&cfg.whisper_keep_alive);
+    let ustate = update::State::load();
     Ok(Ajustes {
         shell: shell("ajustes"),
         shortcuts: shortcut_rows(),
@@ -269,6 +310,12 @@ fn ajustes_with(shortcut_error: Option<(String, String)>) -> Result<String> {
         shortcuts_note: SHORTCUTS_NOTE,
         win_label: WIN_LABEL,
         shortcut_error,
+        version: update::version_line(),
+        update_mode: cfg.update.clone(),
+        update_modes: UPDATE_MODES.to_vec(),
+        update_available: ustate.available().map(str::to_owned),
+        update_message: update_message.or(ustate.error.clone()),
+        update_note: update_note(&ustate),
     }
     .render()?)
 }
@@ -311,8 +358,17 @@ pub fn ajustar(what: &str, form: &HashMap<String, String>) -> Result<String> {
             let id = form.get("atalho").cloned().unwrap_or_default();
             if let Err(e) = edit_shortcut(what, &id, form) {
                 let id = if what == "atalho-novo" { "novo".to_owned() } else { id };
-                return ajustes_with(Some((id, format!("{e:#}"))));
+                return ajustes_with(Some((id, format!("{e:#}"))), None);
             }
+        }
+        "atualizacao" if UPDATE_MODES.iter().any(|m| m.0 == value) => set_config("update", value)?,
+        "procurar" => {
+            let msg = talk_rs(&["update", "--check"]).unwrap_or_else(|e| format!("{e:#}"));
+            return ajustes_with(None, Some(msg));
+        }
+        "atualizar" => {
+            let msg = talk_rs(&["update"]).unwrap_or_else(|e| format!("{e:#}"));
+            return ajustes_with(None, Some(msg));
         }
         _ => anyhow::bail!("ajuste inválido: {what}={value}"),
     }

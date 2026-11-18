@@ -257,3 +257,8 @@ input.keycap:focus { outline: none; box-shadow: 0 0 0 1px var(--ink); }
 input.keycap:placeholder-shown { border-style: dashed; }
 .hint { font-size: 12px; color: var(--ink3); margin-top: 8px; }
 .keyedit .actions { display: flex; gap: 8px; align-items: center; margin-top: 10px; }
+
+/* versão: o número à esquerda, a ação à direita; o resultado do clique logo abaixo. */
+.version { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
+.version .k { font-variant-numeric: tabular-nums; }
+.status { font-size: 13px; color: var(--ink); margin: 0 0 10px; max-width: 60ch; }

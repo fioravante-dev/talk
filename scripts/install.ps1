@@ -10,7 +10,9 @@
 # RTX com o driver instalado.
 #
 # Variáveis: $env:TALK_DIR (onde fica o código, padrão ~\src\talk) e
-# $env:CUDA_ARCH (padrão: a da placa, pelo nvidia-smi).
+# $env:CUDA_ARCH (padrão: a da placa, pelo nvidia-smi). $env:TALK_UPDATE=1 é o
+# modo da atualização pela bandeja (`talk-rs update`): roda escondido, então
+# falha em vez de abrir o winget se faltar alguma ferramenta.
 
 $ErrorActionPreference = "Stop"
 function Say($t) { Write-Host "[talk] $t" -ForegroundColor Cyan }
@@ -28,6 +30,7 @@ Say "placa: $(& nvidia-smi --query-gpu=name --format=csv,noheader | Select-Objec
 # 2. As ferramentas, pelo winget, só as que faltam.
 function Need($id, $test, $extra) {
     if (& $test) { return }
+    if ($env:TALK_UPDATE) { throw "falta $id: rode o scripts\install.ps1 num terminal" }
     Say "instalando $id"
     $a = @("install", "--id", $id, "-e", "--accept-package-agreements", "--accept-source-agreements") + $extra
     & winget @a
@@ -63,4 +66,7 @@ $ErrorActionPreference = "Continue"
 if ($LASTEXITCODE -ne 0) { throw "o build falhou" }
 $ErrorActionPreference = "Stop"
 & "$src\scripts\install-windows.ps1"
+# De onde o `talk-rs update` puxa e recompila.
+$record = "# Escrito pelo scripts\install.ps1: de onde o talk-rs update puxa e recompila.`nsrc = '$src'`ncuda_arch = '$env:CUDA_ARCH'`n"
+[IO.File]::WriteAllText("$env:LOCALAPPDATA\talk\install.toml", $record)
 Say "pronto: Ctrl+Alt+D dita (detectando o idioma), Ctrl+Alt+Shift+D em inglês. Troque nos Ajustes."

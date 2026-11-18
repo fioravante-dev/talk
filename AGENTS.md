@@ -32,12 +32,25 @@ O que o agente precisa saber antes:
 ## Verificar
 
 ```bash
+talk-rs --version       # a versão e o commit do código instalado
 talk-rs status          # "idle" = pronto; erro = o serviço não está rodando
 talk-rs toggle          # começa a gravar; de novo, para e cola onde está o cursor
 ```
 
 No Windows o executável fica em `%LOCALAPPDATA%\Programs\talk\talk-rs.exe`.
 Logs: `~/.cache/talk/` no Linux, `%LOCALAPPDATA%\talk\` no Windows.
+
+Depois de instalado, o próprio talk se atualiza (`talk-rs update`, ou pela
+bandeja). Ele puxa do código registrado em `~/.cache/talk/install.toml`.
+
+## Publicar uma versão
+
+1. Suba a `version` do `Cargo.toml`, faça o commit e crie a tag `vX.Y.Z`.
+2. No Windows, `scripts\package-windows.ps1` gera em `target\dist` o
+   `talk-setup-X.Y.Z.exe`, o `talk-app-X.Y.Z-cudaN.zip` (só os programas, para
+   atualizar) e um `.sha256` de cada.
+3. `gh release create vX.Y.Z` com esses quatro arquivos. É a release que os
+   talks instalados enxergam; sem ela, ninguém atualiza.
 
 ## Atalhos
 

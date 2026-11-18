@@ -105,6 +105,24 @@
       <div class="meter" data-meter aria-hidden="true">{% for _ in 0..16 %}<i></i>{% endfor %}</div>
       <p class="note">O medidor mexe enquanto você dita.</p>
     </section>
+    <section aria-labelledby="h-versao">
+      <h2 id="h-versao">versão</h2>
+      <div class="row version">
+        <span class="k">talk {{ version }}</span>
+        {% if let Some(v) = update_available %}
+        <form hx-post="/ajustes/atualizar"><button type="submit">atualizar para {{ v }}</button></form>
+        {% else %}
+        <form hx-post="/ajustes/procurar"><button type="submit" class="quiet">procurar agora</button></form>
+        {% endif %}
+      </div>
+      {% if let Some(m) = update_message %}<p class="status" role="status">{{ m }}</p>{% endif %}
+      <form class="seg seg-sm" hx-post="/ajustes/atualizacao" hx-trigger="change" aria-label="Versão nova">
+        {% for (value, label) in update_modes %}
+        <label><input type="radio" name="valor" value="{{ value }}" {% if update_mode == *value %}checked{% endif %}><span>{{ label }}</span></label>
+        {% endfor %}
+      </form>
+      <p class="note">{{ update_note }}</p>
+    </section>
   </div>
 </div>
 {% endblock %}
