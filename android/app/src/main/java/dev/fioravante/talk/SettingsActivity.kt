@@ -128,9 +128,19 @@ class SettingsActivity : Activity() {
         ) { prefs.mode = it }
         text("Botão de falar", 14f)
         choice(
-            listOf("center" to "No meio", "left" to "À esquerda", "right" to "À direita", "both" to "Dos dois lados"),
-            prefs.micSide,
-        ) { prefs.micSide = it }
+            listOf(
+                "right" to "No canto direito, onde o Gboard põe o microfone",
+                "left" to "No canto esquerdo",
+                "center" to "No meio",
+                "both" to "Nos dois cantos",
+            ),
+            prefs.micPos,
+        ) { prefs.micPos = it }
+        root.addView(CheckBox(this).apply {
+            text = "O botão cresce com a voz"
+            isChecked = prefs.micPulse
+            setOnCheckedChangeListener { _, on -> prefs.micPulse = on }
+        })
         root.addView(CheckBox(this).apply {
             text = "Começar a gravar ao abrir"
             isChecked = prefs.autostart

@@ -69,10 +69,15 @@ class Prefs(context: Context) {
     var autostart: Boolean
         get() = p.getBoolean("autostart_v2", false)
         set(v) = p.edit().putBoolean("autostart_v2", v).apply()
-    /** Onde fica o botão de falar: center, left, right ou both. */
-    var micSide: String
-        get() = p.getString("mic_side", "center") ?: "center"
-        set(v) = p.edit().putString("mic_side", v).apply()
+    /** Onde fica o botão de falar na faixa de cima: right (onde o Gboard põe o
+     *  microfone), left, center ou both. */
+    var micPos: String
+        get() = p.getString("mic_pos", "right") ?: "right"
+        set(v) = p.edit().putString("mic_pos", v).apply()
+    /** O botão cresce com a voz, além do medidor. */
+    var micPulse: Boolean
+        get() = p.getBoolean("mic_pulse", false)
+        set(v) = p.edit().putBoolean("mic_pulse", v).apply()
     /** Depois de digitar, volta para o teclado de antes. */
     var returnAfter: Boolean
         get() = p.getBoolean("return_after", true)
