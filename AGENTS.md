@@ -91,11 +91,12 @@ Não edite o arquivo de atalhos do COSMIC na mão enquanto a janela está aberta
 ## Celular (Android)
 
 O app em `android/` é um teclado só de voz: grava, transcreve no PC pelo
-Tailscale (ou no próprio celular, com o large-v3-turbo baixado pelo app) e
-digita no campo.
+Tailscale (ou no próprio celular, com o Parakeet v3 via sherpa-onnx ou o
+large-v3-turbo, baixados pelo app) e digita no campo.
 
 - No PC: `listen = "<ip do tailscale>:7878"` no `config.toml` e reiniciar o
-  serviço. Ele passa a atender `GET /health`, `GET /vocab`, `POST /warm` e
+  serviço. Ele passa a atender `GET /health`, `GET /peers` (os talks da
+  tailnet, que o app usa para achar os PCs), `GET /vocab`, `POST /warm` e
   `POST /transcribe?language=pt` (corpo: WAV). Ver `crates/talk/src/remote.rs`.
 - Sem sessão gráfica (máquina na tela de login), o serviço sobe assim mesmo e
   só atende pela rede: sem bandeja e sem colar.
