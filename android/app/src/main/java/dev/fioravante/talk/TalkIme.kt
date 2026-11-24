@@ -33,8 +33,11 @@ class TalkIme : InputMethodService() {
     private lateinit var mic: TextView
     private var state = State.IDLE
     private var recorder: Recorder? = null
-    /** null = ainda perguntando; true/false = o PC respondeu ou não. */
+    /** null = ainda perguntando; true/false = um PC respondeu ou não. */
     @Volatile private var pcOk: Boolean? = null
+    /** O PC que respondeu primeiro nesta ditada. */
+    @Volatile private var pc: Remote? = null
+    private var probe: Thread? = null
     private val unloadLater = Runnable { Local.unload() }
 
     override fun onCreate() {
@@ -132,18 +135,19 @@ class TalkIme : InputMethodService() {
         recorder = r
         state = State.RECORDING
         pcOk = null
+        pc = null
         ui.removeCallbacks(unloadLater)
         render()
         tick()
         val p = prefs
-        thread(name = "talk-probe") {
+        probe = thread(name = "talk-probe") {
             if (p.mode != "phone") {
-                val remote = Remote(p.server, p.token)
-                val ok = remote.healthy()
-                pcOk = ok
+                val remote = Remote.pick(p)
+                pc = remote
+                pcOk = remote != null
                 ui.post { if (state == State.RECORDING) render() }
-                if (ok) {
-                    remote.warm()
+                if (remote != null) {
+                    thread { remote.warm() }
                     runCatching { remote.vocab() }.onSuccess { (v, t) -> p.vocab = v; p.vocabTxt = t }
                     return@thread
                 }
@@ -169,9 +173,11 @@ class TalkIme : InputMethodService() {
         state = State.WORKING
         render()
         val p = prefs
-        val usePc = pcOk
+        val waitFor = probe
         thread(name = "talk-stt") {
-            val outcome = runCatching { transcribe(pcm, p, usePc) }
+            // Parou antes de algum PC responder: espera a pergunta terminar.
+            waitFor?.join(2500)
+            val outcome = runCatching { transcribe(pcm, p, pc) }
             ui.post {
                 state = State.IDLE
                 outcome.onSuccess { r ->
@@ -189,12 +195,12 @@ class TalkIme : InputMethodService() {
     }
 
     /** O PC quando dá; se ele falhar no meio, o celular (com modelo baixado). */
-    private fun transcribe(pcm: ShortArray, p: Prefs, pcOk: Boolean?): Result = when (p.mode) {
-        "pc" -> Remote(p.server, p.token).transcribe(pcm, p.language)
+    private fun transcribe(pcm: ShortArray, p: Prefs, pc: Remote?): Result = when (p.mode) {
+        "pc" -> (pc ?: throw RuntimeException("nenhum PC respondeu")).transcribe(pcm, p.language)
         "phone" -> Local.transcribe(pcm, p)
-        else -> if (pcOk != false && p.server.isNotEmpty()) {
+        else -> if (pc != null) {
             try {
-                Remote(p.server, p.token).transcribe(pcm, p.language)
+                pc.transcribe(pcm, p.language)
             } catch (e: Exception) {
                 if (!p.hasModel) throw e
                 Local.transcribe(pcm, p)
@@ -257,10 +263,10 @@ class TalkIme : InputMethodService() {
     }
 
     private fun where(): String = when (prefs.mode) {
-        "pc" -> "PC"
+        "pc" -> pc?.server?.name ?: if (pcOk == false) "nenhum PC" else "procurando o PC…"
         "phone" -> "celular"
         else -> when (pcOk) {
-            true -> "PC"
+            true -> pc?.server?.name ?: "PC"
             false -> if (prefs.hasModel) "celular" else "sem PC"
             null -> "procurando o PC…"
         }

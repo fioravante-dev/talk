@@ -1,17 +1,22 @@
 package dev.fioravante.talk
 
+import org.json.JSONArray
 import org.json.JSONObject
-import java.io.ByteArrayOutputStream
 import java.net.HttpURLConnection
 import java.net.URL
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicReference
+import kotlin.concurrent.thread
 
-/** O talk do PC, pela rede (Tailscale). Tudo aqui bloqueia: chame fora da thread da tela. */
-class Remote(private val server: String, private val token: String) {
+/** Um talk de PC, pela rede (Tailscale). Tudo aqui bloqueia: chame fora da thread da tela. */
+class Remote(val server: Server, private val token: String) {
 
     private fun open(path: String, method: String, connectMs: Int, readMs: Int): HttpURLConnection {
-        val c = URL(server + path).openConnection() as HttpURLConnection
+        val c = URL(server.url + path).openConnection() as HttpURLConnection
         c.requestMethod = method
         c.connectTimeout = connectMs
         c.readTimeout = readMs
@@ -19,25 +24,17 @@ class Remote(private val server: String, private val token: String) {
         return c
     }
 
-    private fun HttpURLConnection.json(): JSONObject {
+    private fun HttpURLConnection.json(): String {
         val ok = responseCode in 200..299
         val body = (if (ok) inputStream else errorStream)?.bufferedReader()?.readText() ?: "{}"
         disconnect()
-        val j = JSONObject(body)
-        if (!ok) throw RuntimeException(j.optString("error", "HTTP $responseCode"))
-        return j
+        if (!ok) throw RuntimeException(runCatching { JSONObject(body).optString("error") }.getOrNull() ?: "HTTP $responseCode")
+        return body
     }
 
-    /** Responde rápido ou não conta: no 4G sem o PC ligado, esperar é pior que cair para o celular. */
-    fun healthy(timeoutMs: Int = 1500): Boolean = check(timeoutMs) == null
-
-    /** null se o PC respondeu; senão, o motivo, para mostrar nos ajustes. */
+    /** null se o PC respondeu; senão, o motivo. */
     fun check(timeoutMs: Int): String? = try {
-        when {
-            server.isEmpty() -> "sem endereço"
-            open("/health", "GET", timeoutMs, timeoutMs).json().optBoolean("ok") -> null
-            else -> "resposta estranha"
-        }
+        if (JSONObject(open("/health", "GET", timeoutMs, timeoutMs).json()).optBoolean("ok")) null else "resposta estranha"
     } catch (e: Exception) {
         "${e.javaClass.simpleName}: ${e.message}"
     }
@@ -55,8 +52,14 @@ class Remote(private val server: String, private val token: String) {
 
     /** (vocab, vocab_txt) do PC. */
     fun vocab(): Pair<String, String> {
-        val j = open("/vocab", "GET", 1500, 5000).json()
+        val j = JSONObject(open("/vocab", "GET", 1500, 5000).json())
         return j.optString("vocab") to j.optString("vocab_txt")
+    }
+
+    /** Os talks que este PC achou na tailnet. */
+    fun peers(): List<Server> {
+        val a = JSONArray(open("/peers", "GET", 1500, 10_000).json())
+        return (0 until a.length()).map { a.getJSONObject(it).let { o -> Server(o.getString("name"), o.getString("url")) } }
     }
 
     fun transcribe(pcm: ShortArray, language: String): Result {
@@ -66,10 +69,30 @@ class Remote(private val server: String, private val token: String) {
         val wav = wav(pcm)
         c.setFixedLengthStreamingMode(wav.size)
         c.outputStream.use { it.write(wav) }
-        return Result.from(c.json(), "PC")
+        return Result.from(JSONObject(c.json()), server.name)
     }
 
     companion object {
+        /**
+         * O PC a usar agora: o escolhido nos ajustes, ou — no automático —
+         * o primeiro a responder, perguntando a todos ao mesmo tempo.
+         */
+        fun pick(p: Prefs, timeoutMs: Int = 1500): Remote? {
+            val token = p.token
+            val chosen = p.servers.filter { p.target == "auto" || it.url == p.target }
+            if (chosen.isEmpty()) return null
+            val winner = AtomicReference<Remote?>(null)
+            val left = AtomicInteger(chosen.size)
+            val done = CountDownLatch(1)
+            for (s in chosen) thread(name = "talk-pick") {
+                val r = Remote(s, token)
+                if (r.check(timeoutMs) == null) winner.compareAndSet(null, r)
+                if (winner.get() != null || left.decrementAndGet() == 0) done.countDown()
+            }
+            done.await(timeoutMs + 500L, TimeUnit.MILLISECONDS)
+            return winner.get()
+        }
+
         /** PCM de 16 bits, mono, 16 kHz, com o cabeçalho de 44 bytes. */
         fun wav(pcm: ShortArray): ByteArray {
             val data = pcm.size * 2

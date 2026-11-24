@@ -123,3 +123,18 @@ pub extern "system" fn Java_dev_fioravante_talk_Engine_transcribe(
 pub extern "system" fn Java_dev_fioravante_talk_Engine_unload(_: JNIEnv, _: JClass) {
     *engine() = None;
 }
+
+/// `Engine.applyVocab(text, vocab_txt, vocab)`: as trocas do vocabulário, para
+/// o texto de um motor que não é o Whisper (o Parakeet).
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_fioravante_talk_Engine_applyVocab(
+    mut env: JNIEnv,
+    _: JClass,
+    text: JString,
+    vocab_txt: JString,
+    vocab: JString,
+) -> jstring {
+    let (text, vocab_txt, vocab) = (string(&mut env, &text), string(&mut env, &vocab_txt), string(&mut env, &vocab));
+    let out = Vocab::new(&vocab_txt, &vocab).apply(&text);
+    env.new_string(out).map(|s| s.into_raw()).unwrap_or(std::ptr::null_mut())
+}

@@ -19,4 +19,7 @@ object Engine {
     ): String
 
     @JvmStatic external fun unload()
+
+    /** As trocas do vocabulário (vocab.txt do PC), para o texto do Parakeet. */
+    @JvmStatic external fun applyVocab(text: String, vocabTxt: String, vocab: String): String
 }

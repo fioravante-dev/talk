@@ -5,7 +5,8 @@
 //! Liga com `listen = "<ip do tailscale>:7878"` no config. Sem TLS e sem
 //! conta: quem protege é a tailnet (e o `listen_token`, se definido).
 //!
-//!     GET  /health                    {"ok":true,"version":"…","model":"…"}
+//!     GET  /health                    {"ok":true,"host":"pop-os","version":"…","model":"…"}
+//!     GET  /peers                     os talks da tailnet que responderam: [{"name","url"}]
 //!     GET  /vocab                     {"vocab":"…","vocab_txt":"…"}: o app guarda para ditar sem o PC
 //!     POST /warm                      sobe o trabalhador já (o app chama ao começar a gravar)
 //!     POST /transcribe?language=pt    corpo: WAV → {"text","language","stt_seconds","audio_seconds"}
@@ -62,9 +63,11 @@ fn handle(service: &Service, mut req: Request) {
         match (req.method(), path.as_str()) {
             (Method::Get, "/health") => Ok(json!({
                 "ok": true,
+                "host": hostname(),
                 "version": talk_core::update::VERSION,
                 "model": cfg.ggml_model,
             })),
+            (Method::Get, "/peers") => Ok(json!(peers(&cfg))),
             (Method::Get, "/vocab") => Ok(json!({
                 "vocab": cfg.vocab,
                 "vocab_txt": std::fs::read_to_string(paths::vocab_file()).unwrap_or_default(),
@@ -127,6 +130,63 @@ fn transcribe(service: &Service, cfg: &Config, req: &mut Request, language: Opti
         "stt_seconds": done.stt_seconds,
         "audio_seconds": audio_seconds,
     }))
+}
+
+fn hostname() -> String {
+    let env = std::env::var("COMPUTERNAME").or_else(|_| std::env::var("HOSTNAME")).unwrap_or_default();
+    if !env.is_empty() {
+        return env;
+    }
+    std::fs::read_to_string("/etc/hostname").map(|s| s.trim().to_owned()).unwrap_or_default()
+}
+
+/// Os talks da tailnet: pergunta ao `tailscale status` quem está online e
+/// bate no `/health` de cada um, na mesma porta deste, todos ao mesmo tempo.
+/// O app do celular usa isto para achar os PCs sozinho.
+fn peers(cfg: &Config) -> Vec<serde_json::Value> {
+    let port = cfg.listen.rsplit_once(':').map_or("7878", |(_, p)| p).to_owned();
+    let Ok(out) = std::process::Command::new("tailscale").args(["status", "--json"]).output() else {
+        return vec![];
+    };
+    let Ok(status) = serde_json::from_slice::<serde_json::Value>(&out.stdout) else { return vec![] };
+    let mut nodes = vec![];
+    let mut add = |n: &serde_json::Value| {
+        let ip = n["TailscaleIPs"].as_array().and_then(|ips| ips.iter().filter_map(|i| i.as_str()).find(|i| !i.contains(':')));
+        if let (Some(ip), Some(name)) = (ip, n["HostName"].as_str()) {
+            nodes.push((name.to_owned(), format!("{ip}:{port}")));
+        }
+    };
+    add(&status["Self"]);
+    if let Some(peers) = status["Peer"].as_object() {
+        for p in peers.values().filter(|p| p["Online"].as_bool() == Some(true)) {
+            add(p);
+        }
+    }
+    let token = cfg.listen_token.clone();
+    let probes: Vec<_> = nodes
+        .into_iter()
+        .map(|(name, addr)| {
+            let token = token.clone();
+            thread::spawn(move || answers(&addr, &token).then(|| json!({"name": name, "url": format!("http://{addr}")})))
+        })
+        .collect();
+    probes.into_iter().filter_map(|t| t.join().ok().flatten()).collect()
+}
+
+/// Um `GET /health` à mão, com prazo curto: não vale uma biblioteca de HTTP.
+fn answers(addr: &str, token: &str) -> bool {
+    use std::io::Write;
+    use std::net::{TcpStream, ToSocketAddrs};
+    let Some(sock) = addr.to_socket_addrs().ok().and_then(|mut a| a.next()) else { return false };
+    let Ok(mut s) = TcpStream::connect_timeout(&sock, Duration::from_millis(800)) else { return false };
+    let _ = s.set_read_timeout(Some(Duration::from_millis(1500)));
+    let auth = if token.is_empty() { String::new() } else { format!("Authorization: Bearer {token}\r\n") };
+    if write!(s, "GET /health HTTP/1.0\r\nHost: {addr}\r\n{auth}\r\n").is_err() {
+        return false;
+    }
+    let mut body = String::new();
+    let _ = s.read_to_string(&mut body);
+    body.contains("\"ok\":true")
 }
 
 fn authorized(req: &Request, token: &str) -> bool {
