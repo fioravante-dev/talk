@@ -18,12 +18,17 @@ use crate::stt::{VAD_MODEL, transcribe};
 
 /// O lado de dentro: `talk-rs worker --model ...`.
 pub fn run(model: &Path) -> Result<()> {
+    let started = Instant::now();
     let mut params = WhisperContextParameters::default();
     params.use_gpu(true).flash_attn(true);
     let path = model.to_str().context("caminho do modelo não é UTF-8")?;
     let ctx = WhisperContext::new_with_params(path, params)
         .with_context(|| format!("não deu para carregar {}", model.display()))?;
+    let loaded = started.elapsed().as_secs_f64();
     let mut state = ctx.create_state()?;
+    // Para comparar máquinas: no Windows a primeira subida depois de ligar o PC
+    // levou ~30 s, e as seguintes ~1 s.
+    eprintln!("[worker] modelo na GPU em {loaded:.2}s, pronto em {:.2}s", started.elapsed().as_secs_f64());
     // O Silero do whisper.cpp. Sem ele, silêncio vira "Inscreva-se no canal e
     // ative o sininho": o Whisper preenche o vazio com o que mais viu no treino.
     // O whisper.cpp só roda o VAD no `whisper_full`, não no `full_with_state`

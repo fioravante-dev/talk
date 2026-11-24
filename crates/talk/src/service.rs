@@ -630,6 +630,20 @@ pub fn serve() -> Result<()> {
     #[cfg(windows)]
     crate::hotkeys::spawn(service.clone());
 
+    // No Windows, o primeiro trabalhador depois de ligar o PC leva ~30 s para
+    // pôr o modelo na GPU (os seguintes, ~1 s). Sobe um já no login: o custo
+    // fica antes da primeira ditada, e o `reap` o manda embora no tempo de sempre.
+    #[cfg(windows)]
+    {
+        let me = service.clone();
+        thread::spawn(move || {
+            let cfg = Config::load(&paths::config_file()).unwrap_or_default();
+            if let Err(e) = me.ensure_worker(&cfg) {
+                eprintln!("[talk] não deu para aquecer o modelo: {e:#}");
+            }
+        });
+    }
+
     // A janela sobe já, escondida: o WebView2 leva ~1 s para acordar a frio,
     // e assim abrir pela bandeja é só mostrar.
     #[cfg(windows)]
