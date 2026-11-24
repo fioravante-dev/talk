@@ -30,7 +30,9 @@ class TalkIme : InputMethodService() {
     private val ui = Handler(Looper.getMainLooper())
     private lateinit var prefs: Prefs
     private lateinit var status: TextView
-    private lateinit var mic: TextView
+    private val mics = mutableListOf<TextView>()
+    private lateinit var cancelButton: TextView
+    private var builtSide = ""
     private var state = State.IDLE
     private var recorder: Recorder? = null
     /** null = ainda perguntando; true/false = um PC respondeu ou não. */
@@ -47,55 +49,100 @@ class TalkIme : InputMethodService() {
 
     private fun dp(v: Int) = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, v.toFloat(), resources.displayMetrics).toInt()
 
-    private fun button(label: String, size: Float = 22f, onClick: () -> Unit) = TextView(this).apply {
+    private fun button(label: String, size: Float = 20f, onClick: () -> Unit) = TextView(this).apply {
         text = label
         textSize = size
         setTextColor(Color.WHITE)
         gravity = Gravity.CENTER
-        setPadding(dp(16), dp(10), dp(16), dp(10))
+        setPadding(dp(14), dp(6), dp(14), dp(6))
         setOnClickListener { onClick() }
     }
 
+    /** Uma tecla com fundo, como as do teclado comum. */
+    private fun keyButton(label: String, size: Float = 20f, onClick: () -> Unit) = button(label, size, onClick).apply {
+        background = GradientDrawable().apply {
+            cornerRadius = dp(8).toFloat()
+            setColor(Color.rgb(58, 58, 60))
+        }
+    }
+
+    private fun keyParams(width: Int = dp(52), weight: Float = 0f) =
+        LinearLayout.LayoutParams(width, -1, weight).apply { setMargins(dp(3), 0, dp(3), 0) }
+
+    private fun newMic() = TextView(this).apply {
+        gravity = Gravity.CENTER
+        textSize = 13f
+        typeface = Typeface.DEFAULT_BOLD
+        setTextColor(Color.WHITE)
+        setOnClickListener { onMic() }
+    }.also { mics += it }
+
+    private fun micParams() = LinearLayout.LayoutParams(dp(56), dp(56)).apply { setMargins(dp(4), 0, dp(4), 0) }
+
     override fun onCreateInputView(): View {
+        builtSide = prefs.micSide
+        mics.clear()
         status = TextView(this).apply {
             setTextColor(Color.rgb(170, 170, 176))
-            textSize = 14f
+            textSize = 13f
+            setPadding(dp(6), 0, 0, 0)
         }
+        cancelButton = button("✕", 18f) { cancel() }
         val top = LinearLayout(this).apply {
             gravity = Gravity.CENTER_VERTICAL
             addView(status, LinearLayout.LayoutParams(0, -2, 1f))
-            addView(button("⚙") { openSettings() })
-            addView(button("⌨") { back() })
+            addView(cancelButton)
+            addView(button("⚙", 18f) { openSettings() })
+            addView(button("⌨", 18f) { back() })
         }
-        mic = TextView(this).apply {
-            gravity = Gravity.CENTER
-            textSize = 18f
-            typeface = Typeface.DEFAULT_BOLD
-            setTextColor(Color.WHITE)
-            setOnClickListener { onMic() }
-        }
-        val center = FrameLayout(this).apply {
-            addView(mic, FrameLayout.LayoutParams(dp(112), dp(112), Gravity.CENTER))
-        }
-        val bottom = LinearLayout(this).apply {
-            gravity = Gravity.CENTER
-            addView(button("Cancelar", 15f) { cancel() })
-            addView(View(this@TalkIme), LinearLayout.LayoutParams(0, 1, 1f))
-            addView(button("⌫") { key(KeyEvent.KEYCODE_DEL) })
-            addView(button("↵") { enter() })
+        val space = { keyButton("espaço", 14f) { type(" ", raw = true) } }
+        val del = { keyButton("⌫") { key(KeyEvent.KEYCODE_DEL) } }
+        val enter = { keyButton("↵") { enter() } }
+        // O microfone onde o polegar alcança: no meio, num canto ou nos dois.
+        val row = LinearLayout(this).apply {
+            gravity = Gravity.CENTER_VERTICAL
+            val keyH = dp(46)
+            fun keys(into: LinearLayout) {
+                into.addView(space(), keyParams(0, 1f).apply { height = keyH })
+                into.addView(del(), keyParams().apply { height = keyH })
+                into.addView(enter(), keyParams().apply { height = keyH })
+            }
+            when (builtSide) {
+                "left" -> { addView(newMic(), micParams()); keys(this) }
+                "right" -> { keys(this); addView(newMic(), micParams()) }
+                "both" -> {
+                    addView(newMic(), micParams())
+                    keys(this)
+                    addView(newMic(), micParams())
+                }
+                else -> {
+                    val left = LinearLayout(this@TalkIme).apply {
+                        gravity = Gravity.CENTER_VERTICAL
+                        addView(space(), keyParams(0, 1f).apply { height = keyH })
+                    }
+                    val right = LinearLayout(this@TalkIme).apply {
+                        gravity = Gravity.CENTER_VERTICAL or Gravity.END
+                        addView(del(), keyParams().apply { height = keyH })
+                        addView(enter(), keyParams().apply { height = keyH })
+                    }
+                    addView(left, LinearLayout.LayoutParams(0, -2, 1f))
+                    addView(newMic(), micParams())
+                    addView(right, LinearLayout.LayoutParams(0, -2, 1f))
+                }
+            }
         }
         return LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(Color.rgb(28, 28, 30))
-            setPadding(dp(8), dp(4), dp(8), dp(8))
+            setPadding(dp(6), dp(2), dp(6), dp(8))
             addView(top)
-            addView(center, LinearLayout.LayoutParams(-1, dp(150)))
-            addView(bottom)
+            addView(row, LinearLayout.LayoutParams(-1, dp(64)))
         }.also { render() }
     }
 
     override fun onStartInputView(info: EditorInfo?, restarting: Boolean) {
         super.onStartInputView(info, restarting)
+        if (prefs.micSide != builtSide) setInputView(onCreateInputView())
         render()
         if (state == State.IDLE && prefs.autostart && !restarting) start()
     }
@@ -218,8 +265,12 @@ class TalkIme : InputMethodService() {
     }
 
     /** Com um espaço antes se o texto anterior não terminar em espaço. */
-    private fun type(text: String) {
+    private fun type(text: String, raw: Boolean = false) {
         val ic = currentInputConnection ?: return
+        if (raw) {
+            ic.commitText(text, 1)
+            return
+        }
         val before = ic.getTextBeforeCursor(1, 0)
         val sep = if (!before.isNullOrEmpty() && !before.last().isWhitespace()) " " else ""
         ic.commitText(sep + text.trim(), 1)
@@ -273,21 +324,24 @@ class TalkIme : InputMethodService() {
     }
 
     private fun render() {
-        if (!::mic.isInitialized) return
+        if (mics.isEmpty()) return
         val (label, color) = when (state) {
             State.IDLE -> "Falar" to Color.rgb(58, 58, 60)
             State.RECORDING -> "Parar" to Color.rgb(255, 69, 58)
             State.WORKING -> "…" to Color.rgb(58, 58, 60)
         }
-        mic.text = label
-        mic.background = GradientDrawable().apply {
-            shape = GradientDrawable.OVAL
-            setColor(color)
+        for (mic in mics) {
+            mic.text = label
+            mic.background = GradientDrawable().apply {
+                shape = GradientDrawable.OVAL
+                setColor(color)
+            }
+            if (state != State.RECORDING) {
+                mic.scaleX = 1f
+                mic.scaleY = 1f
+            }
         }
-        if (state != State.RECORDING) {
-            mic.scaleX = 1f
-            mic.scaleY = 1f
-        }
+        cancelButton.visibility = if (state == State.IDLE) View.GONE else View.VISIBLE
         status.text = when (state) {
             State.RECORDING -> {
                 val s = recorder?.seconds ?: 0
@@ -300,8 +354,10 @@ class TalkIme : InputMethodService() {
     }
 
     private fun pulse(level: Float) {
-        val s = 1f + (level * 6f).coerceAtMost(0.25f)
-        mic.scaleX = s
-        mic.scaleY = s
+        val s = 1f + (level * 6f).coerceAtMost(0.2f)
+        for (mic in mics) {
+            mic.scaleX = s
+            mic.scaleY = s
+        }
     }
 }

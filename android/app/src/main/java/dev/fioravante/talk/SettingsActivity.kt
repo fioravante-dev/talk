@@ -126,6 +126,11 @@ class SettingsActivity : Activity() {
             ),
             prefs.mode,
         ) { prefs.mode = it }
+        text("Botão de falar", 14f)
+        choice(
+            listOf("center" to "No meio", "left" to "À esquerda", "right" to "À direita", "both" to "Dos dois lados"),
+            prefs.micSide,
+        ) { prefs.micSide = it }
         root.addView(CheckBox(this).apply {
             text = "Começar a gravar ao abrir"
             isChecked = prefs.autostart

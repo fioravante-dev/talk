@@ -64,10 +64,15 @@ class Prefs(context: Context) {
     var mode: String
         get() = p.getString("mode", "auto") ?: "auto"
         set(v) = p.edit().putString("mode", v).apply()
-    /** Começa a gravar assim que o teclado de voz abre. */
+    /** Começa a gravar assim que o teclado de voz abre. Desligado por padrão:
+     *  abrir o teclado sem querer gravava. A chave nova zera quem tinha o antigo. */
     var autostart: Boolean
-        get() = p.getBoolean("autostart", true)
-        set(v) = p.edit().putBoolean("autostart", v).apply()
+        get() = p.getBoolean("autostart_v2", false)
+        set(v) = p.edit().putBoolean("autostart_v2", v).apply()
+    /** Onde fica o botão de falar: center, left, right ou both. */
+    var micSide: String
+        get() = p.getString("mic_side", "center") ?: "center"
+        set(v) = p.edit().putString("mic_side", v).apply()
     /** Depois de digitar, volta para o teclado de antes. */
     var returnAfter: Boolean
         get() = p.getBoolean("return_after", true)
