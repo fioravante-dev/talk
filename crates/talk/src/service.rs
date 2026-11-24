@@ -21,7 +21,8 @@ use serde::{Deserialize, Serialize};
 use talk_core::config::Config;
 use talk_core::vocab::Vocab;
 use talk_core::update::State as UpdateState;
-use talk_core::{history, paths, wire::Job};
+use talk_core::wire::{Done, Job};
+use talk_core::{history, paths};
 #[cfg(windows)]
 use uds_windows::{UnixListener, UnixStream};
 
@@ -77,7 +78,10 @@ impl Phase {
 pub struct Service {
     phase: Mutex<Phase>,
     worker: Mutex<Option<Worker>>,
-    keyboard: Mutex<Keyboard>,
+    /// `None` quando o `/dev/uinput` não abriu: o serviço sobe assim mesmo
+    /// (numa máquina que só atende ditadas pela rede ele nem é usado) e tenta
+    /// de novo na hora de colar.
+    keyboard: Mutex<Option<Keyboard>>,
     last: Mutex<String>,
     tray: Mutex<Option<Handle<Tray>>>,
     /// As janelas abertas, ouvindo os eventos. Quem fechou sai na próxima escrita.
@@ -205,7 +209,7 @@ impl Service {
 
     /// Sobe o trabalhador se não houver um vivo com o modelo certo. Volta logo:
     /// a carga acontece no processo filho, em paralelo à fala.
-    fn ensure_worker(&self, cfg: &Config) -> Result<()> {
+    pub(crate) fn ensure_worker(&self, cfg: &Config) -> Result<()> {
         let model = model_path(cfg);
         if !model.exists() {
             bail!("modelo não encontrado: {}", model.display());
@@ -296,24 +300,24 @@ impl Service {
         });
     }
 
-    fn finish(&self, capture: Capture, language: Option<&str>) -> Result<()> {
-        let released = Instant::now();
-        let audio = capture.stop()?;
-        let cfg = Config::load(&paths::config_file())?;
+    /// Áudio → texto pelo trabalhador, com a dica e as trocas do vocabulário.
+    /// Serve à ditada daqui e às que chegam pela rede (`remote`): as duas
+    /// esperam a vez no mesmo trabalhador.
+    pub(crate) fn transcribe(&self, cfg: &Config, audio: &[f32], language: Option<&str>) -> Result<(String, Done)> {
         let vocab_text = std::fs::read_to_string(paths::vocab_file()).unwrap_or_default();
         let vocab = Vocab::new(&vocab_text, &cfg.vocab);
         let job = Job {
-            language: resolve_language(language, &cfg),
+            language: resolve_language(language, cfg),
             prompt: vocab.prompt(),
             beam_size: cfg.beam_size,
             samples: audio.len(),
         };
 
-        self.ensure_worker(&cfg)?;
+        self.ensure_worker(cfg)?;
         let done = {
             let mut w = lock(&self.worker);
             let worker = w.as_mut().ok_or_else(|| anyhow!("sem trabalhador"))?;
-            match worker.transcribe(&job, &audio) {
+            match worker.transcribe(&job, audio) {
                 Ok(d) => d,
                 Err(e) => {
                     *w = None; // morreu no meio: o próximo atalho sobe outro
@@ -321,10 +325,17 @@ impl Service {
                 }
             }
         };
-        if let Some(err) = done.error {
+        if let Some(err) = &done.error {
             bail!("{err}");
         }
-        let text = vocab.apply(&done.text);
+        Ok((vocab.apply(&done.text), done))
+    }
+
+    fn finish(&self, capture: Capture, language: Option<&str>) -> Result<()> {
+        let released = Instant::now();
+        let audio = capture.stop()?;
+        let cfg = Config::load(&paths::config_file())?;
+        let (text, done) = self.transcribe(&cfg, &audio, language)?;
         if text.is_empty() {
             notify("⃠ Nenhuma fala reconhecida", "");
             return Ok(());
@@ -342,7 +353,11 @@ impl Service {
             _ => {
                 output::copy(&text)?;
                 let combo = output::parse_combo(&cfg.paste_key)?;
-                lock(&self.keyboard).press(&combo)?;
+                let mut kb = lock(&self.keyboard);
+                if kb.is_none() {
+                    *kb = Some(Keyboard::new()?);
+                }
+                kb.as_mut().ok_or_else(|| anyhow!("sem teclado virtual"))?.press(&combo)?;
                 &["paste"]
             }
         };
@@ -543,7 +558,9 @@ pub fn serve() -> Result<()> {
     let service = Arc::new(Service {
         phase: Mutex::new(Phase::Idle),
         worker: Mutex::new(None),
-        keyboard: Mutex::new(Keyboard::new()?),
+        keyboard: Mutex::new(
+            Keyboard::new().inspect_err(|e| eprintln!("[talk] sem colar por enquanto: {e:#}")).ok(),
+        ),
         last: Mutex::new(String::new()),
         tray: Mutex::new(None),
         subscribers: Mutex::new(vec![]),
@@ -608,6 +625,7 @@ pub fn serve() -> Result<()> {
     });
     service.reap();
     service.watch_updates();
+    crate::remote::spawn(service.clone());
     #[cfg(windows)]
     crate::hotkeys::spawn(service.clone());
 

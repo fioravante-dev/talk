@@ -13,4 +13,5 @@ pub mod resample;
 pub mod shortcuts;
 pub mod update;
 pub mod vocab;
+pub mod wav;
 pub mod wire;

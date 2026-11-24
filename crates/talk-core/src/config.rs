@@ -39,6 +39,12 @@ pub struct Config {
     /// `ask` avisa da versão nova e espera o clique; `auto` atualiza sozinho
     /// quando o talk está parado; `off` nem procura.
     pub update: String,
+    /// Onde ouvir ditadas de outros aparelhos (o app do celular, outro PC),
+    /// como `100.73.197.50:7878`: o endereço do Tailscale desta máquina, para
+    /// só a tailnet alcançar. Vazio = desligado. Vale ao subir o serviço.
+    pub listen: String,
+    /// Se não vazio, o pedido remoto precisa de `Authorization: Bearer <isto>`.
+    pub listen_token: String,
 }
 
 /// O Super+D é do Windows (mostra a área de trabalho) e não pode ser registrado.
@@ -66,6 +72,8 @@ impl Default for Config {
             input_device: String::new(),
             hotkeys: default_hotkeys(),
             update: "ask".into(),
+            listen: String::new(),
+            listen_token: String::new(),
         }
     }
 }

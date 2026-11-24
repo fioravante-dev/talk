@@ -14,6 +14,7 @@ mod audio;
 mod hotkeys;
 #[cfg_attr(windows, path = "output_win.rs")]
 mod output;
+mod remote;
 mod service;
 #[cfg_attr(windows, path = "tray_win.rs")]
 mod tray;
