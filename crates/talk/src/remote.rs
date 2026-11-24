@@ -6,6 +6,7 @@
 //! conta: quem protege é a tailnet (e o `listen_token`, se definido).
 //!
 //!     GET  /health                    {"ok":true,"version":"…","model":"…"}
+//!     GET  /vocab                     {"vocab":"…","vocab_txt":"…"}: o app guarda para ditar sem o PC
 //!     POST /warm                      sobe o trabalhador já (o app chama ao começar a gravar)
 //!     POST /transcribe?language=pt    corpo: WAV → {"text","language","stt_seconds","audio_seconds"}
 
@@ -63,6 +64,10 @@ fn handle(service: &Service, mut req: Request) {
                 "ok": true,
                 "version": talk_core::update::VERSION,
                 "model": cfg.ggml_model,
+            })),
+            (Method::Get, "/vocab") => Ok(json!({
+                "vocab": cfg.vocab,
+                "vocab_txt": std::fs::read_to_string(paths::vocab_file()).unwrap_or_default(),
             })),
             (Method::Post, "/warm") => {
                 service.ensure_worker(&cfg).map(|()| json!({"ok": true})).map_err(|e| (500, format!("{e:#}")))

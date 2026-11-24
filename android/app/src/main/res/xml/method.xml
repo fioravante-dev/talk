@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- O subtipo "voice" faz o Android tratar o talk como entrada por voz: teclados
+     que têm botão de microfone ligado ao sistema podem chamá-lo direto. -->
+<input-method xmlns:android="http://schemas.android.com/apk/res/android"
+    android:settingsActivity="dev.fioravante.talk.SettingsActivity"
+    android:supportsSwitchingToNextInputMethod="true">
+    <subtype
+        android:label="Voz"
+        android:imeSubtypeLocale="pt_BR"
+        android:imeSubtypeMode="voice" />
+</input-method>

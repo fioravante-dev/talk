@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Um microfone simples sobre fundo escuro. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="48dp" android:height="48dp"
+    android:viewportWidth="48" android:viewportHeight="48">
+    <path android:fillColor="#1C1C1E" android:pathData="M24,0a24,24 0,1 1,0 48a24,24 0,1 1,0 -48z" />
+    <path android:fillColor="#FF453A"
+        android:pathData="M24,10a6,6 0,0 1,6 6v8a6,6 0,0 1,-12 0v-8a6,6 0,0 1,6 -6z" />
+    <path android:strokeColor="#FFFFFF" android:strokeWidth="2.5" android:fillColor="#00000000"
+        android:pathData="M14,23a10,10 0,0 0,20 0M24,33v5M18,38h12" />
+</vector>

@@ -1,0 +1,26 @@
+# O motor do app Android: o whisper.cpp na CPU do celular, com o mesmo corte de
+# silêncio, os mesmos filtros e o mesmo vocabulário do talk do PC.
+#
+# Fica fora do workspace de propósito: compilar o whisper.cpp para Android não
+# deve entrar no `cargo test` do PC. Compila pelo Gradle (`cargo ndk`).
+[package]
+name = "talk-android"
+version = "0.3.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+anyhow = "1"
+jni = "0.21"
+serde_json = "1"
+talk-core = { path = "../../crates/talk-core" }
+whisper-rs = "0.16"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1

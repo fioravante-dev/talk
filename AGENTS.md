@@ -85,5 +85,24 @@ Não edite o arquivo de atalhos do COSMIC na mão enquanto a janela está aberta
   apaga. Sem elas, o whisper.cpp sai ~2× mais lento.
 - O código Windows fica em arquivos `*_win.rs`, trocados por
   `#[cfg_attr(windows, path = ...)]`. Mudanças no Windows não mexem no Linux.
-- O único `unsafe` do projeto é `crates/talk-pill/src/main_win.rs`.
+- O `unsafe` do projeto: `crates/talk-pill/src/main_win.rs` e os
+  `#[unsafe(no_mangle)]` das funções JNI em `android/rust/src/lib.rs`.
+
+## Celular (Android)
+
+O app em `android/` é um teclado só de voz: grava, transcreve no PC pelo
+Tailscale (ou no próprio celular, com o large-v3-turbo baixado pelo app) e
+digita no campo.
+
+- No PC: `listen = "<ip do tailscale>:7878"` no `config.toml` e reiniciar o
+  serviço. Ele passa a atender `GET /health`, `GET /vocab`, `POST /warm` e
+  `POST /transcribe?language=pt` (corpo: WAV). Ver `crates/talk/src/remote.rs`.
+- Sem sessão gráfica (máquina na tela de login), o serviço sobe assim mesmo e
+  só atende pela rede: sem bandeja e sem colar.
+- Compilar: `cd android && ./gradlew assembleRelease`, com `JAVA_HOME` num JDK
+  17 e `ANDROID_HOME` no SDK com o NDK. O Gradle chama `android/rust/build.sh`,
+  que compila o motor (Rust + whisper.cpp) com `cargo ndk`.
+- O `android/rust` fica fora do workspace: o `cargo test` do PC não compila o
+  whisper.cpp para Android. A transcrição é a mesma do PC:
+  `crates/talk/src/stt.rs`, incluído por `#[path]`.
 - O projeto todo está em português: comentários, mensagens e commits.

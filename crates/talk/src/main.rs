@@ -16,6 +16,7 @@ mod hotkeys;
 mod output;
 mod remote;
 mod service;
+mod stt;
 #[cfg_attr(windows, path = "tray_win.rs")]
 mod tray;
 mod update;
