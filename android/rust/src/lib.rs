@@ -62,6 +62,7 @@ fn transcribe(audio: &[f32], language: &str, vocab_txt: &str, vocab: &str, vad: 
         // Na CPU do celular, busca em feixe custa caro demais para ditado.
         beam_size: 1,
         samples: audio.len(),
+        fit_audio: true,
     };
     let vad = (!vad.is_empty() && std::path::Path::new(vad).exists()).then_some(vad);
     let (text, language) = stt::transcribe(&mut loaded.state, vad, &job, audio)?;

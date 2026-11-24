@@ -64,6 +64,11 @@ pub fn transcribe(
         }
         None => audio,
     };
+    if job.fit_audio {
+        // 50 posições por segundo de áudio; a folga evita cortar o fim da fala.
+        let ctx = (audio.len() as f64 / RATE as f64 * 50.0).ceil() as i32 + 64;
+        full.set_audio_ctx(ctx.min(1500));
+    }
     state.full(full, audio)?;
 
     let mut parts = vec![];

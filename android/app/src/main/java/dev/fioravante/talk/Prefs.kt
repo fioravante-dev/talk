@@ -11,7 +11,7 @@ class Prefs(context: Context) {
     /** Ex.: http://100.73.197.50:7878 (o `listen` do config.toml do PC). */
     var server: String
         get() = p.getString("server", "") ?: ""
-        set(v) = p.edit().putString("server", v.trim().trimEnd('/')).apply()
+        set(v) = p.edit().putString("server", normalize(v)).apply()
     var token: String
         get() = p.getString("token", "") ?: ""
         set(v) = p.edit().putString("token", v.trim()).apply()
@@ -45,6 +45,15 @@ class Prefs(context: Context) {
     val hasModel get() = modelFile.length() > 100_000_000
 
     companion object {
+        /** "100.73.197.50" ou "pop-os:7878" viram "http://100.73.197.50:7878". */
+        fun normalize(v: String): String {
+            var s = v.trim().trimEnd('/')
+            if (s.isEmpty()) return s
+            if (!s.startsWith("http://") && !s.startsWith("https://")) s = "http://$s"
+            if (!Regex(":\\d+$").containsMatchIn(s.substringAfter("://"))) s += ":7878"
+            return s
+        }
+
         const val MODEL = "ggml-large-v3-turbo-q5_0.bin"
         const val MODEL_URL = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/$MODEL"
         const val VAD = "ggml-silero-v5.1.2.bin"

@@ -163,17 +163,19 @@ class SettingsActivity : Activity() {
     private fun testPc() {
         prefs.server = server.text.toString()
         prefs.token = token.text.toString()
+        server.setText(prefs.server)
         pcStatus.text = "perguntando…"
         val p = prefs
         thread {
             val remote = Remote(p.server, p.token)
-            val msg = if (remote.healthy(3000)) {
+            val problem = remote.check(3000)
+            val msg = if (problem == null) {
                 runCatching { remote.vocab() }.fold(
                     { (v, t) -> p.vocab = v; p.vocabTxt = t; "✓ o PC respondeu; vocabulário trazido" },
                     { "✓ o PC respondeu, mas o vocabulário não veio: ${it.message}" },
                 )
             } else {
-                "✗ sem resposta. O Tailscale está ligado aqui? O talk do PC tem listen no config?"
+                "✗ ${p.server} não respondeu: $problem"
             }
             ui.post { pcStatus.text = msg }
         }

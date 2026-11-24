@@ -311,6 +311,7 @@ impl Service {
             prompt: vocab.prompt(),
             beam_size: cfg.beam_size,
             samples: audio.len(),
+            fit_audio: false,
         };
 
         self.ensure_worker(cfg)?;

@@ -29,10 +29,17 @@ class Remote(private val server: String, private val token: String) {
     }
 
     /** Responde rápido ou não conta: no 4G sem o PC ligado, esperar é pior que cair para o celular. */
-    fun healthy(timeoutMs: Int = 1500): Boolean = try {
-        server.isNotEmpty() && open("/health", "GET", timeoutMs, timeoutMs).json().optBoolean("ok")
+    fun healthy(timeoutMs: Int = 1500): Boolean = check(timeoutMs) == null
+
+    /** null se o PC respondeu; senão, o motivo, para mostrar nos ajustes. */
+    fun check(timeoutMs: Int): String? = try {
+        when {
+            server.isEmpty() -> "sem endereço"
+            open("/health", "GET", timeoutMs, timeoutMs).json().optBoolean("ok") -> null
+            else -> "resposta estranha"
+        }
     } catch (e: Exception) {
-        false
+        "${e.javaClass.simpleName}: ${e.message}"
     }
 
     /** Começa a carregar o modelo no PC enquanto a pessoa fala. */

@@ -16,6 +16,12 @@ pub struct Job {
     pub prompt: String,
     pub beam_size: i32,
     pub samples: usize,
+    /// Encolhe a janela do codificador ao tamanho da fala, em vez dos 30 s
+    /// fixos do Whisper. Na CPU do celular é a diferença entre ~20 s e
+    /// poucos segundos por frase; na GPU do PC não compensa a perda de
+    /// precisão, e fica desligado.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub fit_audio: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -73,7 +79,7 @@ mod tests {
 
     #[test]
     fn a_job_round_trips_with_its_audio() {
-        let job = Job { language: "pt".into(), prompt: "Pop!_OS.".into(), beam_size: 5, samples: 3 };
+        let job = Job { language: "pt".into(), prompt: "Pop!_OS.".into(), beam_size: 5, samples: 3, fit_audio: false };
         let audio = [0.0, -0.5, 0.25];
         let mut buf = vec![];
         send_job(&mut buf, &job, &audio).unwrap();
