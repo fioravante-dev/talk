@@ -245,19 +245,36 @@ impl Service {
         Ok(())
     }
 
+    /// Liga ou desliga a fala: grava no config, acerta a bandeja e, desligando,
+    /// cala o que estiver tocando ou esperando.
+    #[cfg(unix)]
+    fn set_speech(&self, on: bool) -> Result<()> {
+        talk_core::config::save_key(&paths::config_file(), "speech_enabled", on)?;
+        if !on {
+            self.speech.hush();
+        }
+        if let Some(h) = lock(&self.tray).as_ref() {
+            h.update(|t| t.speech_on = on);
+        }
+        Ok(())
+    }
+
     pub fn toggle(self: &Arc<Self>, language: Option<String>) -> Result<&'static str> {
         let mut phase = lock(&self.phase);
         match std::mem::replace(&mut *phase, Phase::Transcribing) {
             Phase::Idle => {
-                // Começar a falar cala o talk: dá para interromper o Claude no meio.
+                // Começar a falar cala o talk: dá para interromper o Claude no
+                // meio. E enquanto grava nada toca (o microfone pegaria).
                 #[cfg(unix)]
-                self.speech.stop();
+                self.speech.set_dictating(true);
                 let cfg = Config::load(&paths::config_file()).unwrap_or_default();
                 let target = (!cfg.input_device.is_empty()).then_some(cfg.input_device.as_str());
                 let capture = match Capture::start(target) {
                     Ok(c) => c,
                     Err(e) => {
                         *phase = Phase::Idle;
+                        #[cfg(unix)]
+                        self.speech.set_dictating(false);
                         return Err(e);
                     }
                 };
@@ -294,6 +311,8 @@ impl Service {
                         notify("⚠ talk", &format!("{e:#}"));
                     }
                     *lock(&me.phase) = Phase::Idle;
+                    #[cfg(unix)]
+                    me.speech.set_dictating(false);
                     me.set_look(Look::Idle, "pronto");
                 });
                 Ok("transcribing")
@@ -474,12 +493,13 @@ impl Service {
             #[cfg(unix)]
             "speak" => match req.text.filter(|t| !t.trim().is_empty()) {
                 Some(text) => {
-                    match req.thread.filter(|t| !t.trim().is_empty()) {
-                        Some(thread) => {
-                            let cfg = Config::load(&paths::config_file()).unwrap_or_default();
-                            self.speech.enqueue_for_thread(thread, text, &cfg.speech_when);
+                    let cfg = Config::load(&paths::config_file()).unwrap_or_default();
+                    // Desligada, a fala nem é gerada; quem pediu não precisa saber.
+                    if cfg.speech_enabled {
+                        match req.thread.filter(|t| !t.trim().is_empty()) {
+                            Some(thread) => self.speech.enqueue_for_thread(thread, text, &cfg.speech_when),
+                            None => self.speech.enqueue(text),
                         }
-                        None => self.speech.enqueue(text),
                     }
                     Reply { ok: true, phase: lock(&self.phase).name().into(), ..Reply::default() }
                 }
@@ -493,6 +513,15 @@ impl Service {
                 },
                 phase: lock(&self.phase).name().into(),
                 ..Reply::default()
+            },
+            // `talk-rs speech on|off`, a bandeja e a janela.
+            #[cfg(unix)]
+            "speech" => match req.text.as_deref() {
+                Some(v @ ("on" | "off")) => match self.set_speech(v == "on") {
+                    Ok(()) => Reply { ok: true, phase: lock(&self.phase).name().into(), ..Reply::default() },
+                    Err(e) => Reply { ok: false, error: Some(format!("{e:#}")), ..Reply::default() },
+                },
+                _ => Reply { ok: false, error: Some("use on ou off".into()), ..Reply::default() },
             },
             #[cfg(unix)]
             "hush" => {
@@ -649,6 +678,8 @@ pub fn serve() -> Result<()> {
                 update: UpdateState::load().available().map(str::to_owned),
                 #[cfg(unix)]
                 recent: recent_spoken(),
+                #[cfg(unix)]
+                speech_on: Config::load(&paths::config_file()).map_or(true, |c| c.speech_enabled),
                 actions: tx.clone(),
             }).spawn() {
                 Ok(h) => {
@@ -673,6 +704,21 @@ pub fn serve() -> Result<()> {
             match action {
                 Action::Toggle => {
                     if let Err(e) = me.toggle(None) {
+                        notify("⚠ talk", &format!("{e:#}"));
+                    }
+                }
+                // Falando, o clique cala; calado, fala de novo.
+                #[cfg(unix)]
+                Action::Click => {
+                    if me.speech.speaking() {
+                        me.speech.stop();
+                    } else if !me.speech.replay() {
+                        notify("talk", "Ainda não há fala para repetir.");
+                    }
+                }
+                #[cfg(unix)]
+                Action::SpeechOn(on) => {
+                    if let Err(e) = me.set_speech(on) {
                         notify("⚠ talk", &format!("{e:#}"));
                     }
                 }

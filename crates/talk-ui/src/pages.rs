@@ -106,6 +106,8 @@ pub struct Ajustes {
     pub shortcuts: Vec<ShortcutRow>,
     pub languages: Vec<(&'static str, &'static str)>,
     pub paste_key: String,
+    /// A fala ligada; `None` onde não há fala (Windows).
+    pub speech_on: Option<bool>,
     pub models: Vec<ModelChoice>,
     pub keep_options: Vec<(&'static str, &'static str)>,
     pub keep_alive: String,
@@ -301,6 +303,7 @@ fn ajustes_with(shortcut_error: Option<(String, String)>, update_message: Option
         shortcuts: shortcut_rows(),
         languages: LANGUAGES.to_vec(),
         paste_key: cfg.paste_key.to_lowercase(),
+        speech_on: cfg!(unix).then_some(cfg.speech_enabled),
         models,
         keep_options: KEEP.to_vec(),
         keep_alive: KEEP[idx].0.to_owned(),
@@ -322,9 +325,7 @@ fn ajustes_with(shortcut_error: Option<(String, String)>, update_message: Option
 }
 
 fn set_config(key: &str, value: &str) -> Result<()> {
-    let path = paths::config_file();
-    let text = config::set_key(&read(&path), key, value)?;
-    write_atomic(&path, &text)
+    config::save_key(&paths::config_file(), key, value)
 }
 
 pub fn ajustar(what: &str, form: &HashMap<String, String>) -> Result<String> {
@@ -334,6 +335,12 @@ pub fn ajustar(what: &str, form: &HashMap<String, String>) -> Result<String> {
         "modelo" if MODELS.iter().any(|m| m.0 == value) => set_config("ggml_model", value)?,
         "carregado" if KEEP.iter().any(|k| k.0 == value) => set_config("whisper_keep_alive", value)?,
         "microfone" => set_config("input_device", value)?,
+        // Grava aqui (vale mesmo sem o serviço) e avisa o serviço, que acerta
+        // a bandeja e, desligando, cala.
+        "fala" if ["on", "off"].contains(&value) => {
+            config::save_key(&paths::config_file(), "speech_enabled", value == "on")?;
+            let _ = talk_rs(&["speech", value]);
+        }
         #[cfg(windows)]
         "idioma" if LANGUAGES.iter().any(|l| l.0 == value) => {
             let path = paths::config_file();

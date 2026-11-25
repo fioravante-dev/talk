@@ -142,6 +142,9 @@ pub struct Speech {
     focused: Arc<Mutex<Option<String>>>,
     /// O vigia do foco subiu (é o COSMIC). Sem ele, `focus` vira `always`.
     watching: Arc<AtomicBool>,
+    /// Gravando uma ditada: nada toca (o microfone pegaria a fala), e o que
+    /// ficar pronto espera, guardado.
+    dictating: Arc<AtomicBool>,
 }
 
 type OnSpoken = Box<dyn Fn() + Send>;
@@ -164,13 +167,14 @@ impl Speech {
             on_spoken: Arc::new(Mutex::new(None)),
             focused: Arc::new(Mutex::new(None)),
             watching: Arc::new(AtomicBool::new(false)),
+            dictating: Arc::new(AtomicBool::new(false)),
         };
         let generator = me.clone();
         thread::spawn(move || {
             for u in rx {
-                if !generator.cancelled(u.generation)
-                    && let Err(e) = generator.run(u)
-                {
+                // Calada antes de começar, a fala ainda é gerada e guardada (em
+                // silêncio): fica no histórico para tocar depois.
+                if let Err(e) = generator.run(u) {
                     eprintln!("[speech] {e:#}");
                 }
             }
@@ -220,6 +224,9 @@ impl Speech {
     fn on_focus(&self, window: Option<&str>) {
         *lock(&self.focused) = window.map(str::to_owned);
         let Some(window) = window else { return };
+        if self.dictating() {
+            return; // espera a ditada; `set_dictating(false)` olha de novo
+        }
         let ready: Vec<Clip> = {
             let mut pending = lock(&self.pending);
             let keys: Vec<String> =
@@ -267,6 +274,22 @@ impl Speech {
     }
 
     /// Quantas falas esperam o foco (para o `status`).
+    /// A ditada começou ou acabou. No começo cala o que estiver tocando; no
+    /// fim, toca o que ficou esperando pela conversa que está na tela.
+    pub fn set_dictating(&self, on: bool) {
+        self.dictating.store(on, Ordering::SeqCst);
+        if on {
+            self.stop();
+        } else {
+            let focused = lock(&self.focused).clone();
+            self.on_focus(focused.as_deref());
+        }
+    }
+
+    fn dictating(&self) -> bool {
+        self.dictating.load(Ordering::SeqCst)
+    }
+
     pub fn waiting(&self) -> usize {
         lock(&self.pending).len()
     }
@@ -277,10 +300,12 @@ impl Speech {
         self.stop();
     }
 
-    /// Corta o som agora e descarta a fila (começar uma ditada faz isto). O
-    /// que espera o foco de uma conversa continua esperando.
+    /// Corta o som agora (começar uma ditada faz isto). A fila não toca, mas
+    /// é gerada em silêncio e vai para o histórico; o que espera o foco de
+    /// uma conversa continua esperando.
     pub fn stop(&self) {
         self.generation.fetch_add(1, Ordering::SeqCst);
+        self.speaking.store(false, Ordering::SeqCst);
         if let Some(mut p) = lock(&self.player).take() {
             let _ = p.kill();
             let _ = p.wait();
@@ -304,18 +329,17 @@ impl Speech {
     }
 
     fn run(&self, u: Utterance) -> Result<()> {
-        let live = matches!(u.target, Target::Play);
+        let live = matches!(u.target, Target::Play) && !self.cancelled(u.generation);
         let Some((samples, rate, made)) = self.synthesize(&u.text, u.generation, live)? else { return Ok(()) };
         let clip = self.record(samples, rate, made, u.thread.as_deref(), u.redo)?;
         match u.target {
             Target::Play => *lock(&self.last) = Some(clip.id),
             Target::Hold(thread) => {
-                if self.cancelled(u.generation) {
-                    return Ok(());
-                }
                 // A conversa ganhou foco enquanto o áudio era gerado: toca já.
-                if self.shows(&thread) {
-                    self.play_clip(&clip, u.generation);
+                // Um `stop` (a ditada) não joga fora a fala que espera o foco;
+                // o `hush` esvazia as que esperam.
+                if self.shows(&thread) && !self.dictating() {
+                    self.play_clip(&clip, self.generation.load(Ordering::SeqCst));
                 } else {
                     eprintln!("[speech] pronto, esperando o foco: {}", hash(&thread));
                     let mut pending = lock(&self.pending);
@@ -375,15 +399,15 @@ impl Speech {
         let mut out: Option<ChildStdin> = None;
         // Ao vivo, segura o alto-falante a fala toda: um áudio pronto que
         // chegar no meio espera a vez.
-        let _turn = live.then(|| lock(&self.speaker));
-        if live {
+        // Calada no meio (`stop`, a ditada), para de tocar mas termina de
+        // gerar: a fala inteira vai para o histórico.
+        let mut audible = live && !self.dictating();
+        let mut turn = audible.then(|| lock(&self.speaker));
+        if audible {
             self.speaking.store(true, Ordering::SeqCst);
         }
 
         for sentence in speech::sentences(&prose, MAX_SENTENCE) {
-            if self.cancelled(generation) {
-                break;
-            }
             let mut guard = lock(&self.worker);
             if !guard.as_mut().is_some_and(|w| w.alive() && w.model == cfg.speech_model) {
                 *guard = None; // o antigo sai antes, para os dois não disputarem a VRAM
@@ -409,30 +433,35 @@ impl Speech {
                     }
                     break;
                 }
-                // Cancelado no meio: o resto da frase ainda chega e é jogado fora,
-                // para o fio seguir alinhado para a próxima.
-                if self.cancelled(generation) || audio.is_empty() {
+                if audio.is_empty() {
                     continue;
                 }
                 rate = chunk.rate;
                 samples.extend_from_slice(&audio);
-                if live {
+                if audible && (self.cancelled(generation) || self.dictating()) {
+                    audible = false;
+                    out = None;
+                    turn = None; // solta o alto-falante para quem vier
+                    self.speaking.store(false, Ordering::SeqCst);
+                }
+                if audible {
                     if out.is_none() && first_sound.is_none() {
                         out = Some(self.open_player(rate)?);
                         first_sound = Some(started.elapsed());
                     }
                     if out.as_mut().is_some_and(|o| o.write_all(&f32_bytes(&audio)).is_err()) {
-                        out = None; // o pw-play morreu (stop): o resto é descartado
+                        out = None; // o pw-play morreu (stop)
                     }
                 }
             }
             w.last_used = Instant::now();
         }
-        if live {
+        if audible {
             drop(out);
             self.wait_player();
             self.speaking.store(false, Ordering::SeqCst);
         }
+        drop(turn);
         eprintln!(
             "[speech] {} ({language}, {speaker}): {}, {:.1}s de áudio em {:.1}s",
             hash(&prose),
@@ -440,7 +469,7 @@ impl Speech {
             samples.len() as f64 / f64::from(rate.max(1)),
             started.elapsed().as_secs_f64()
         );
-        if self.cancelled(generation) || samples.is_empty() {
+        if samples.is_empty() {
             return Ok(None);
         }
         Ok(Some((samples, rate, Made { prose, language, voice: speaker })))

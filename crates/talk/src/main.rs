@@ -76,6 +76,12 @@ enum Cmd {
     /// Cala a fala de agora e esvazia a fila.
     #[cfg(unix)]
     Hush,
+    /// Liga ou desliga a fala (o mesmo que "Fala ligada" na bandeja).
+    #[cfg(unix)]
+    Speech {
+        #[arg(value_parser = ["on", "off"])]
+        state: String,
+    },
     /// Fala de novo a última fala (o mesmo que clicar no ícone da bandeja),
     /// ou uma do histórico pelo id (`talk-rs again 20261124-143210-123`).
     #[cfg(unix)]
@@ -151,6 +157,14 @@ fn main() -> Result<()> {
         Cmd::Again { id } => {
             if !service::request(&service::Request { text: id, ..service::Request::new("again") })?.ok {
                 bail!("não achei essa fala para repetir");
+            }
+            Ok(())
+        }
+        #[cfg(unix)]
+        Cmd::Speech { state } => {
+            let reply = service::request(&service::Request { text: Some(state), ..service::Request::new("speech") })?;
+            if let Some(e) = reply.error {
+                bail!("{e}");
             }
             Ok(())
         }

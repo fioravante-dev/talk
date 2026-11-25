@@ -45,6 +45,10 @@ pub struct Config {
     pub listen: String,
     /// Se não vazio, o pedido remoto precisa de `Authorization: Bearer <isto>`.
     pub listen_token: String,
+    /// A fala ligada: `false` faz o `talk-rs speak` não dizer nada (nem
+    /// gerar o áudio). Liga e desliga pela bandeja, pela janela ou pelo
+    /// `talk-rs speech on|off`.
+    pub speech_enabled: bool,
     /// A fala (`talk-rs speak`): o modelo do Qwen3-TTS, do Hugging Face.
     pub speech_model: String,
     /// A voz de cada idioma, entre as do modelo (`vivian`, `ryan`, `serena`...).
@@ -94,6 +98,7 @@ impl Default for Config {
             update: "ask".into(),
             listen: String::new(),
             listen_token: String::new(),
+            speech_enabled: true,
             speech_model: "Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice".into(),
             speech_voice_pt: "vivian".into(),
             speech_voice_en: "ryan".into(),
@@ -166,6 +171,19 @@ pub fn set_key(text: &str, key: &str, value: impl Into<toml_edit::Value>) -> Res
         }
     }
     Ok(doc.to_string())
+}
+
+/// `set_key` direto no arquivo: lê, troca e grava ao lado e renomeia (quem
+/// lê o config ao mesmo tempo nunca pega um arquivo pela metade).
+pub fn save_key(path: &Path, key: &str, value: impl Into<toml_edit::Value>) -> Result<()> {
+    let text = std::fs::read_to_string(path).unwrap_or_default();
+    let new = set_key(&text, key, value)?;
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    let tmp = path.with_extension("talk-tmp");
+    std::fs::write(&tmp, new)?;
+    std::fs::rename(&tmp, path).with_context(|| path.display().to_string())
 }
 
 /// Troca o idioma de um atalho do `[hotkeys]` (Windows), preservando o resto
@@ -294,6 +312,20 @@ mod tests {
     fn missing_file_is_the_defaults() {
         let cfg = Config::load(Path::new("/nao/existe/config.toml")).unwrap();
         assert_eq!(cfg, Config::default());
+    }
+
+    #[test]
+    fn save_key_writes_a_bool_the_config_reads_back() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        assert!(Config::default().speech_enabled);
+        std::fs::write(&path, "# a fala\nspeech_when = \"focus\"\n").unwrap();
+        save_key(&path, "speech_enabled", false).unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(text.starts_with("# a fala\n"), "{text}");
+        assert!(!Config::parse(&text).unwrap().speech_enabled);
+        // Sem o arquivo, cria.
+        save_key(&dir.path().join("novo/config.toml"), "speech_enabled", true).unwrap();
     }
 
     #[test]

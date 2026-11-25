@@ -68,6 +68,16 @@
         <label><input type="radio" name="valor" value="ctrl+shift+v" {% if paste_key == "ctrl+shift+v" %}checked{% endif %}><span>Ctrl+Shift+V<small>terminais</small></span></label>
       </form>
     </section>
+    {% if let Some(on) = speech_on %}
+    <section aria-labelledby="h-fala">
+      <h2 id="h-fala">fala</h2>
+      <form class="seg" hx-post="/ajustes/fala" hx-trigger="change">
+        <label><input type="radio" name="valor" value="on" {% if on %}checked{% endif %}><span>ligada<small>o Claude fala o resumo</small></span></label>
+        <label><input type="radio" name="valor" value="off" {% if !on %}checked{% endif %}><span>desligada<small>silêncio</small></span></label>
+      </form>
+      <p class="note">Também no menu da bandeja. Clicar no ícone cala a fala; começar uma ditada também.</p>
+    </section>
+    {% endif %}
   </div>
   <div class="col">
     <section aria-labelledby="h-modelo">

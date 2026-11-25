@@ -6,7 +6,7 @@
 use std::sync::mpsc::Sender;
 
 pub use ksni::blocking::{Handle, TrayMethods};
-use ksni::menu::{StandardItem, SubMenu};
+use ksni::menu::{CheckmarkItem, StandardItem, SubMenu};
 use ksni::{Icon, MenuItem};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -19,8 +19,12 @@ pub enum Look {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Action {
     Toggle,
+    /// O clique no ícone: cala a fala de agora, ou fala de novo a última.
+    Click,
     /// Fala de novo a última fala.
     Again,
+    /// Liga ou desliga a fala.
+    SpeechOn(bool),
     /// Toca uma fala do histórico (o id dela).
     Play(String),
     Open,
@@ -37,6 +41,8 @@ pub struct Tray {
     pub update: Option<String>,
     /// As últimas falas, (id, rótulo), a mais nova primeiro.
     pub recent: Vec<(String, String)>,
+    /// A fala ligada (o `speech_enabled` do config).
+    pub speech_on: bool,
     pub actions: Sender<Action>,
 }
 
@@ -74,10 +80,10 @@ impl ksni::Tray for Tray {
     fn tool_tip(&self) -> ksni::ToolTip {
         ksni::ToolTip { title: "talk".into(), description: self.tooltip.clone(), ..Default::default() }
     }
-    /// Clique no ícone: fala de novo a última fala. A ditada fica no atalho
-    /// e no menu.
+    /// Clique no ícone: falando, cala; calado, fala de novo a última fala.
+    /// A ditada fica no atalho e no menu.
     fn activate(&mut self, _x: i32, _y: i32) {
-        let _ = self.actions.send(Action::Again);
+        let _ = self.actions.send(Action::Click);
     }
     fn menu(&self) -> Vec<MenuItem<Self>> {
         let item = |label: &str, action: Action| -> MenuItem<Self> {
@@ -91,8 +97,21 @@ impl ksni::Tray for Tray {
             .into()
         };
         let toggle = if matches!(self.look, Look::Recording { .. }) { "Parar e colar" } else { "Ditar" };
-        let mut menu = vec![item("Falar de novo", Action::Again)];
-        if !self.recent.is_empty() {
+        let mut menu = vec![
+            CheckmarkItem {
+                label: "Fala ligada".into(),
+                checked: self.speech_on,
+                activate: Box::new(|t: &mut Self| {
+                    let _ = t.actions.send(Action::SpeechOn(!t.speech_on));
+                }),
+                ..Default::default()
+            }
+            .into(),
+        ];
+        if self.speech_on {
+            menu.push(item("Falar de novo", Action::Again));
+        }
+        if self.speech_on && !self.recent.is_empty() {
             menu.push(
                 SubMenu {
                     label: "Últimas falas".into(),

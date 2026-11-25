@@ -103,6 +103,12 @@ com versões fixas: o 5.24 quebra o modelo) e baixa o Qwen3-TTS 0.6B.
   leitura) e a fala espera a janela do T3 em foco mostrar aquela conversa
   (`crates/talk/src/focus.rs`, pelo `zcosmic_toplevel_info_v1`). Fora do T3 ou
   fora do COSMIC, toca na hora.
+- Calar: `stop()` (a ditada começando, o clique no ícone falando) só corta o
+  som e sobe a geração; a fala de agora e a fila terminam de ser geradas em
+  silêncio e vão para o histórico. Enquanto `set_dictating(true)`, nada toca e
+  o que espera o foco continua esperando. `hush()` também esvazia as que
+  esperam. `speech_enabled = false` (bandeja, Ajustes, `talk-rs speech off`)
+  faz o `speak` não gerar nada.
 - Histórico: `~/.cache/talk/speech/spoken.jsonl` (texto, para sempre) e
   `clips/<id>.wav` (áudio, `speech_audio_keep = "7d"`, até
   `speech_audio_max_mb = 200`). Sem o áudio, `talk-rs again <id>` gera de novo.

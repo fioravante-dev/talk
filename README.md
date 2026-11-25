@@ -73,15 +73,19 @@ inglês com a ryan.
 
 - Numa conversa do **T3 Code**, a fala espera você abrir aquela conversa: o
   áudio é gerado na hora e toca quando a janela dela ganha foco (no COSMIC).
-- **Clique no ícone** da bandeja para ouvir de novo a última fala; as cinco
-  últimas ficam em "Últimas falas", e todas na aba **falas** da janela. O texto
-  fica para sempre; o áudio, por 7 dias.
-- Começar uma ditada cala a fala.
+- **Clique no ícone** da bandeja: falando, cala; calado, fala de novo a última
+  fala. As cinco últimas ficam em "Últimas falas", e todas na aba **falas** da
+  janela. O texto fica para sempre; o áudio, por 7 dias.
+- Começar uma ditada cala a fala, e nada toca enquanto você dita. Calada no
+  meio, a fala ainda fica inteira no histórico.
+- **Fala ligada**, no menu da bandeja ou em Ajustes, desliga tudo de uma vez:
+  o `talk-rs speak` passa a não dizer nada.
 
 ```bash
 TALK_SPEECH=1 ./scripts/install.sh      # instala a fala (~3 GB a mais)
 talk-rs speak "Pronto, terminei."       # fala (o texto também pode vir do stdin)
 talk-rs hush                            # cala
+talk-rs speech off                      # desliga a fala (on liga)
 talk-rs again                           # de novo a última
 ```
 
