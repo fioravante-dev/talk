@@ -486,6 +486,12 @@ impl Service {
                 None => Reply { ok: false, error: Some("nada para falar".into()), ..Reply::default() },
             },
             #[cfg(unix)]
+            "again" => Reply {
+                ok: self.speech.replay(),
+                phase: lock(&self.phase).name().into(),
+                ..Reply::default()
+            },
+            #[cfg(unix)]
             "hush" => {
                 self.speech.hush();
                 Reply { ok: true, phase: lock(&self.phase).name().into(), ..Reply::default() }
@@ -654,6 +660,12 @@ pub fn serve() -> Result<()> {
                 Action::Toggle => {
                     if let Err(e) = me.toggle(None) {
                         notify("⚠ talk", &format!("{e:#}"));
+                    }
+                }
+                #[cfg(unix)]
+                Action::Again => {
+                    if !me.speech.replay() {
+                        notify("talk", "Ainda não falei nada desde que subi.");
                     }
                 }
                 Action::Open => {

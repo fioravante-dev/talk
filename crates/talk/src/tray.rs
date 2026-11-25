@@ -19,6 +19,8 @@ pub enum Look {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Action {
     Toggle,
+    /// Fala de novo a última fala.
+    Again,
     Open,
     CopyLast,
     Update,
@@ -68,9 +70,10 @@ impl ksni::Tray for Tray {
     fn tool_tip(&self) -> ksni::ToolTip {
         ksni::ToolTip { title: "talk".into(), description: self.tooltip.clone(), ..Default::default() }
     }
-    /// Clique no ícone: começa ou termina a ditada, como o atalho.
+    /// Clique no ícone: fala de novo a última fala. A ditada fica no atalho
+    /// e no menu.
     fn activate(&mut self, _x: i32, _y: i32) {
-        let _ = self.actions.send(Action::Toggle);
+        let _ = self.actions.send(Action::Again);
     }
     fn menu(&self) -> Vec<MenuItem<Self>> {
         let item = |label: &str, action: Action| -> MenuItem<Self> {
@@ -85,6 +88,7 @@ impl ksni::Tray for Tray {
         };
         let toggle = if matches!(self.look, Look::Recording { .. }) { "Parar e colar" } else { "Ditar" };
         let mut menu = vec![
+            item("Falar de novo", Action::Again),
             item(toggle, Action::Toggle),
             item("Abrir talk", Action::Open),
             item("Copiar a última ditada", Action::CopyLast),

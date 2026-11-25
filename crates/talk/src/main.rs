@@ -4,6 +4,7 @@
 //!     talk-rs toggle [-l pt]   o que o atalho chama: começa ou termina a ditada
 //!     talk-rs speak "texto"   fala (o Claude chama no fim de cada resposta)
 //!     talk-rs hush             cala
+//!     talk-rs again            fala de novo a última fala
 //!     talk-rs status
 //!     talk-rs update [--check]
 
@@ -71,6 +72,9 @@ enum Cmd {
     /// Cala a fala de agora e esvazia a fila.
     #[cfg(unix)]
     Hush,
+    /// Fala de novo a última fala (o mesmo que clicar no ícone da bandeja).
+    #[cfg(unix)]
+    Again,
     /// Em que fase o serviço está.
     Status,
     /// Atualiza para a última versão publicada; o talk reinicia sozinho.
@@ -135,6 +139,13 @@ fn main() -> Result<()> {
             })?;
             if let Some(e) = reply.error {
                 bail!("{e}");
+            }
+            Ok(())
+        }
+        #[cfg(unix)]
+        Cmd::Again => {
+            if !service::request(&service::Request::new("again"))?.ok {
+                bail!("ainda não há fala para repetir");
             }
             Ok(())
         }
