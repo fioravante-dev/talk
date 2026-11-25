@@ -45,6 +45,17 @@ pub struct Config {
     pub listen: String,
     /// Se não vazio, o pedido remoto precisa de `Authorization: Bearer <isto>`.
     pub listen_token: String,
+    /// A fala (`talk-rs speak`): o modelo do Qwen3-TTS, do Hugging Face.
+    pub speech_model: String,
+    /// A voz de cada idioma, entre as do modelo (`vivian`, `ryan`, `serena`...).
+    pub speech_voice_pt: String,
+    pub speech_voice_en: String,
+    /// Quanto tempo o trabalhador da fala fica vivo, ocioso: `30s`, `5m`, `never`.
+    /// Subir a frio leva ~10 s; o padrão (30 min) segura ~2,7 GB de VRAM.
+    pub speech_keep_alive: String,
+    /// O Python do ambiente com o `faster-qwen3-tts`. Vazio = o que o
+    /// `install.sh` cria em `~/.cache/talk/speech/venv`.
+    pub speech_python: String,
 }
 
 /// O Super+D é do Windows (mostra a área de trabalho) e não pode ser registrado.
@@ -74,6 +85,11 @@ impl Default for Config {
             update: "ask".into(),
             listen: String::new(),
             listen_token: String::new(),
+            speech_model: "Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice".into(),
+            speech_voice_pt: "vivian".into(),
+            speech_voice_en: "ryan".into(),
+            speech_keep_alive: "30m".into(),
+            speech_python: String::new(),
         }
     }
 }
@@ -102,6 +118,16 @@ impl Config {
     /// `None` = nunca descarrega.
     pub fn keep_alive(&self) -> Result<Option<Duration>> {
         parse_duration(&self.whisper_keep_alive)
+    }
+
+    /// `None` = o trabalhador da fala nunca sai.
+    pub fn speech_keep_alive(&self) -> Result<Option<Duration>> {
+        parse_duration(&self.speech_keep_alive)
+    }
+
+    /// A voz para o idioma (`pt`/`en`); outro idioma fica com a do português.
+    pub fn speech_voice(&self, language: &str) -> &str {
+        if language == "en" { &self.speech_voice_en } else { &self.speech_voice_pt }
     }
 }
 

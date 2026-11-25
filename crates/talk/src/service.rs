@@ -37,6 +37,15 @@ pub struct Request {
     /// Só no `toggle`: "pt", "en", "auto"; ausente = o do config.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub language: Option<String>,
+    /// Só no `speak`: o que falar.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text: Option<String>,
+}
+
+impl Request {
+    pub fn new(cmd: &str) -> Self {
+        Self { cmd: cmd.into(), language: None, text: None }
+    }
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -53,6 +62,11 @@ pub struct Reply {
     pub rss_mb: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    /// Só no `status`, no Linux: falando agora / o modelo da fala na GPU.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub speaking: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub speech_loaded: Option<bool>,
 }
 
 fn event_phase(phase: &str, seconds: u64) -> String {
@@ -86,6 +100,8 @@ pub struct Service {
     tray: Mutex<Option<Handle<Tray>>>,
     /// As janelas abertas, ouvindo os eventos. Quem fechou sai na próxima escrita.
     subscribers: Mutex<Vec<UnixStream>>,
+    #[cfg(unix)]
+    speech: crate::speech::Speech,
 }
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -227,6 +243,9 @@ impl Service {
         let mut phase = lock(&self.phase);
         match std::mem::replace(&mut *phase, Phase::Transcribing) {
             Phase::Idle => {
+                // Começar a falar cala o talk: dá para interromper o Claude no meio.
+                #[cfg(unix)]
+                self.speech.hush();
                 let cfg = Config::load(&paths::config_file()).unwrap_or_default();
                 let target = (!cfg.input_device.is_empty()).then_some(cfg.input_device.as_str());
                 let capture = match Capture::start(target) {
@@ -438,8 +457,25 @@ impl Service {
                 model_loaded: Some(lock(&self.worker).as_mut().is_some_and(Worker::alive)),
                 #[cfg(windows)]
                 rss_mb: memory_stats::memory_stats().map(|m| m.physical_mem as f64 / 1_048_576.0),
+                #[cfg(unix)]
+                speaking: Some(self.speech.speaking()),
+                #[cfg(unix)]
+                speech_loaded: Some(self.speech.loaded()),
                 ..Reply::default()
             },
+            #[cfg(unix)]
+            "speak" => match req.text.filter(|t| !t.trim().is_empty()) {
+                Some(text) => {
+                    self.speech.enqueue(text);
+                    Reply { ok: true, phase: lock(&self.phase).name().into(), ..Reply::default() }
+                }
+                None => Reply { ok: false, error: Some("nada para falar".into()), ..Reply::default() },
+            },
+            #[cfg(unix)]
+            "hush" => {
+                self.speech.hush();
+                Reply { ok: true, phase: lock(&self.phase).name().into(), ..Reply::default() }
+            }
             // A janela mudou as teclas no config: no Windows elas são do
             // serviço e precisam ser registradas de novo (no Linux, do COSMIC,
             // que relê o arquivo sozinho).
@@ -565,6 +601,8 @@ pub fn serve() -> Result<()> {
         last: Mutex::new(String::new()),
         tray: Mutex::new(None),
         subscribers: Mutex::new(vec![]),
+        #[cfg(unix)]
+        speech: crate::speech::Speech::start(),
     });
 
     let (tx, rx) = mpsc::channel();

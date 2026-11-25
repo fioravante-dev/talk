@@ -5,9 +5,12 @@
 //! vira prosa, e a prosa vira frases curtas, para o primeiro áudio sair logo
 //! (o modelo sintetiza a primeira frase enquanto as outras esperam).
 
+use std::io::{BufRead, Write};
 use std::sync::LazyLock;
 
+use anyhow::{Context, Result, bail};
 use regex::Regex;
+use serde::{Deserialize, Serialize};
 
 static LINK: LazyLock<Regex> = LazyLock::new(|| re(r"\[([^\]]*)\]\([^)]*\)"));
 static URL: LazyLock<Regex> = LazyLock::new(|| re(r"https?://\S+"));
@@ -101,6 +104,70 @@ fn is_abbreviation(word: &str) -> bool {
     ABBR.contains(&word.to_lowercase().as_str())
 }
 
+/// `pt` ou `en`, pelo jeito do texto: acentos e palavras que só um dos dois
+/// usa. Empate (ou nenhuma pista) fica com o português, a língua da casa.
+pub fn detect_language(text: &str) -> &'static str {
+    const PT: &[&str] = &[
+        "não", "que", "de", "do", "da", "o", "os", "as", "é", "um", "uma", "para", "com", "você", "está",
+        "isso", "se", "mas", "no", "na", "eu", "ele", "quer", "agora", "depois", "pronto", "também",
+    ];
+    const EN: &[&str] = &[
+        "the", "and", "is", "to", "of", "you", "it", "that", "this", "are", "was", "for", "with", "i",
+        "now", "should", "would", "done", "can", "my", "your", "be", "have", "not",
+    ];
+    let lower = text.to_lowercase();
+    let accents = lower.chars().filter(|c| "ãõçáéíóúâêôà".contains(*c)).count();
+    let (mut pt, mut en) = (accents, 0);
+    for w in lower.split(|c: char| !c.is_alphanumeric()).filter(|w| !w.is_empty()) {
+        pt += usize::from(PT.contains(&w));
+        en += usize::from(EN.contains(&w));
+    }
+    if en > pt { "en" } else { "pt" }
+}
+
+/// Uma frase para o trabalhador da fala, numa linha JSON.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Say {
+    pub text: String,
+    /// `pt` ou `en`.
+    pub language: String,
+    pub speaker: String,
+}
+
+/// O que volta, quantas vezes for: uma linha JSON e logo depois `samples` ×
+/// f32 little-endian, mono. A frase termina com `done` (e `samples` = 0).
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct Chunk {
+    pub samples: usize,
+    pub rate: u32,
+    #[serde(default)]
+    pub done: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+pub fn send_say(w: &mut impl Write, say: &Say) -> Result<()> {
+    writeln!(w, "{}", serde_json::to_string(say)?)?;
+    w.flush()?;
+    Ok(())
+}
+
+/// O próximo pedaço de áudio. Erro quando a saída fecha: o trabalhador caiu.
+pub fn read_chunk(r: &mut impl BufRead) -> Result<(Chunk, Vec<f32>)> {
+    let mut header = String::new();
+    if r.read_line(&mut header)? == 0 {
+        bail!("o trabalhador da fala fechou a saída");
+    }
+    let chunk: Chunk = serde_json::from_str(header.trim()).with_context(|| format!("cabeçalho da fala: {header:?}"))?;
+    if chunk.samples > 48_000 * 60 {
+        bail!("pedaço de {} amostras: mais de um minuto", chunk.samples);
+    }
+    let mut bytes = vec![0u8; chunk.samples * 4];
+    r.read_exact(&mut bytes).context("áudio da fala")?;
+    let audio = bytes.as_chunks::<4>().0.iter().map(|c| f32::from_le_bytes(*c)).collect();
+    Ok((chunk, audio))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -136,5 +203,26 @@ mod tests {
         assert!(got.iter().all(|s| s.chars().count() <= 40), "{got:?}");
         assert_eq!(got[0], "O serviço sobe o trabalhador,");
         assert_eq!(got.join(" "), text);
+    }
+
+    #[test]
+    fn tells_portuguese_from_english() {
+        assert_eq!(detect_language("Pronto, corrigi os dois testes. Quer que eu olhe o terceiro?"), "pt");
+        assert_eq!(detect_language("Done. Two of the three tests pass now; should I dig into it?"), "en");
+        assert_eq!(detect_language("worker.rs"), "pt");
+    }
+
+    #[test]
+    fn reads_the_chunks_the_python_worker_writes() {
+        let mut wire = b"{\"samples\":2,\"rate\":24000}\n".to_vec();
+        wire.extend(0.5f32.to_le_bytes());
+        wire.extend((-1.0f32).to_le_bytes());
+        wire.extend(b"{\"samples\":0,\"rate\":24000,\"done\":true}\n");
+        let mut r = std::io::Cursor::new(wire);
+        let (c, a) = read_chunk(&mut r).unwrap();
+        assert_eq!((c.samples, c.rate, c.done, a), (2, 24000, false, vec![0.5, -1.0]));
+        let (c, a) = read_chunk(&mut r).unwrap();
+        assert!(c.done && a.is_empty() && c.error.is_none());
+        assert!(read_chunk(&mut r).is_err());
     }
 }

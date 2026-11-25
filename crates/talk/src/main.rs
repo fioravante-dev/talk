@@ -2,6 +2,8 @@
 //!
 //!     talk-rs serve            o serviço (bandeja, atalhos, colagem)
 //!     talk-rs toggle [-l pt]   o que o atalho chama: começa ou termina a ditada
+//!     talk-rs speak "texto"   fala (o Claude chama no fim de cada resposta)
+//!     talk-rs hush             cala
 //!     talk-rs status
 //!     talk-rs update [--check]
 
@@ -17,6 +19,8 @@ mod output;
 mod remote;
 mod service;
 mod stt;
+#[cfg(unix)]
+mod speech;
 #[cfg_attr(windows, path = "tray_win.rs")]
 mod tray;
 mod update;
@@ -54,6 +58,15 @@ enum Cmd {
         #[arg(short, long)]
         language: Option<String>,
     },
+    /// Fala o texto (ou o stdin) e volta na hora; as falas fazem fila.
+    #[cfg(unix)]
+    Speak {
+        /// Sem isto, lê do stdin.
+        text: Vec<String>,
+    },
+    /// Cala a fala de agora e esvazia a fila.
+    #[cfg(unix)]
+    Hush,
     /// Em que fase o serviço está.
     Status,
     /// Atualiza para a última versão publicada; o talk reinicia sozinho.
@@ -87,7 +100,7 @@ fn main() -> Result<()> {
         Cmd::Autostart { state } => service::autostart(state == "on"),
         Cmd::Worker { model } => worker::run(&model),
         Cmd::Toggle { language } => {
-            let reply = service::request(&service::Request { cmd: "toggle".into(), language })?;
+            let reply = service::request(&service::Request { language, ..service::Request::new("toggle") })?;
             if let Some(e) = reply.error {
                 bail!("{e}");
             }
@@ -96,16 +109,37 @@ fn main() -> Result<()> {
         }
         #[cfg(windows)]
         Cmd::Hotkeys => {
-            let reply = service::request(&service::Request { cmd: "hotkeys".into(), language: None })?;
+            let reply = service::request(&service::Request::new("hotkeys"))?;
             if let Some(e) = reply.error {
                 bail!("{e}");
             }
             println!("atalhos registrados");
             Ok(())
         }
+        #[cfg(unix)]
+        Cmd::Speak { text } => {
+            let text = if text.is_empty() {
+                std::io::read_to_string(std::io::stdin())?
+            } else {
+                text.join(" ")
+            };
+            let reply = service::request(&service::Request { text: Some(text), ..service::Request::new("speak") })?;
+            if let Some(e) = reply.error {
+                bail!("{e}");
+            }
+            Ok(())
+        }
+        #[cfg(unix)]
+        Cmd::Hush => {
+            service::request(&service::Request::new("hush"))?;
+            Ok(())
+        }
         Cmd::Status => {
-            let reply = service::request(&service::Request { cmd: "status".into(), language: None })?;
-            println!("{}", reply.phase);
+            let reply = service::request(&service::Request::new("status"))?;
+            match reply.speaking {
+                Some(true) => println!("{} (falando)", reply.phase),
+                _ => println!("{}", reply.phase),
+            }
             Ok(())
         }
     }
@@ -113,7 +147,7 @@ fn main() -> Result<()> {
 
 fn run_update(check: bool) -> Result<()> {
     use talk_core::update::VERSION;
-    let ask = |cmd: &str| service::request(&service::Request { cmd: cmd.into(), language: None });
+    let ask = |cmd: &str| service::request(&service::Request::new(cmd));
     if check {
         let state = update::check()?;
         let _ = ask("update-refresh");

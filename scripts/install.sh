@@ -94,6 +94,23 @@ else
     fetch ggml-large-v3-q5_0.bin "$HF/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-q5_0.bin"
 fi
 
+# 6b. A fala (`talk-rs speak`): o Qwen3-TTS só roda em Python, num ambiente
+#     próprio. As versões vão fixas: o transformers 5.24 quebra o modelo.
+#     TALK_SPEECH=0 pula.
+SPEECH="${XDG_CACHE_HOME:-$HOME/.cache}/talk/speech"
+if [[ "${TALK_SPEECH:-1}" != 0 ]]; then
+    if ! command -v uv >/dev/null && [[ ! -x "$BIN/uv" ]]; then
+        say "instalando o uv (o Python da fala)"; curl -LsSf https://astral.sh/uv/install.sh | sh
+    fi
+    uv=$(command -v uv || echo "$BIN/uv")
+    mkdir -p "$SPEECH"
+    [[ -x "$SPEECH/venv/bin/python" ]] || "$uv" venv -q -p 3.12 "$SPEECH/venv"
+    say "ambiente da fala (faster-qwen3-tts; a primeira vez baixa o PyTorch, ~3 GB)"
+    "$uv" pip install -q -p "$SPEECH/venv" "faster-qwen3-tts==0.5.4" "transformers==5.15.1"
+    say "baixando a voz (Qwen3-TTS 0.6B)"
+    "$SPEECH/venv/bin/python" -c 'from huggingface_hub import snapshot_download as d; d("Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice")' >/dev/null
+fi
+
 # 7. O teclado virtual escreve no /dev/uinput.
 if [[ -n "${TALK_UPDATE:-}" ]]; then
     : # a permissão veio na instalação; a atualização não pede sudo
