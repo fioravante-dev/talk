@@ -159,6 +159,8 @@ pub struct Speech {
     dictating: Arc<AtomicBool>,
     /// Ninguém mexe no PC há uns 30 s (`focus::IDLE_MS`).
     idle: Arc<AtomicBool>,
+    /// As falas que ficaram prontas durante uma ditada, para tocar no fim dela.
+    after_dictation: Arc<Mutex<Vec<Clip>>>,
     /// A última vez que a pessoa estava aqui, com o T3 na frente: com dois
     /// PCs, a fala vai para o que ela usou por último.
     present_at: Arc<Mutex<Option<Instant>>>,
@@ -186,6 +188,7 @@ impl Speech {
             watching: Arc::new(AtomicBool::new(false)),
             dictating: Arc::new(AtomicBool::new(false)),
             idle: Arc::new(AtomicBool::new(false)),
+            after_dictation: Arc::new(Mutex::new(vec![])),
             present_at: Arc::new(Mutex::new(None)),
         };
         let generator = me.clone();
@@ -330,8 +333,16 @@ impl Speech {
         if on {
             self.stop();
         } else {
+            self.play_after_dictation();
             let focused = lock(&self.focused).clone();
             self.on_focus(focused.as_deref());
+        }
+    }
+
+    fn play_after_dictation(&self) {
+        let clips: Vec<Clip> = std::mem::take(&mut *lock(&self.after_dictation));
+        for clip in clips {
+            self.play_in_background(clip);
         }
     }
 
@@ -346,6 +357,7 @@ impl Speech {
     /// `talk-rs hush`: cala e descarta também o que esperava o foco.
     pub fn hush(&self) {
         lock(&self.pending).clear();
+        lock(&self.after_dictation).clear();
         self.stop();
     }
 
@@ -379,8 +391,17 @@ impl Speech {
     fn run(&self, u: Utterance) -> Result<()> {
         let live = matches!(u.target, Target::Play) && !self.cancelled(u.generation);
         let Some((samples, rate, made)) = self.synthesize(&u.text, u.generation, live)? else { return Ok(()) };
+        // Ia tocar na hora, mas uma ditada estava gravando (e ninguém calou):
+        // toca quando ela acabar.
+        let held_by_dictation = live && !made.played && !self.cancelled(u.generation);
         let clip = self.record(samples, rate, made, u.thread.as_deref(), u.redo)?;
         match u.target {
+            Target::Play if held_by_dictation => {
+                lock(&self.after_dictation).push(clip);
+                if !self.dictating() {
+                    self.play_after_dictation(); // acabou enquanto gerava
+                }
+            }
             Target::Play => *lock(&self.last) = Some(clip.id),
             Target::Hold(thread) => {
                 // A conversa ganhou foco enquanto o áudio era gerado: toca já.
@@ -520,7 +541,7 @@ impl Speech {
         if samples.is_empty() {
             return Ok(None);
         }
-        Ok(Some((samples, rate, Made { prose, language, voice: speaker })))
+        Ok(Some((samples, rate, Made { played: first_sound.is_some(), prose, language, voice: speaker })))
     }
 
     /// Toca um áudio pronto numa thread: quem avisa (o vigia, a bandeja) não espera.
@@ -615,6 +636,8 @@ impl Speech {
 
 /// O que a síntese decidiu, para o histórico.
 struct Made {
+    /// Tocou (pelo menos o começo). Ao vivo e sem tocar = a ditada segurou.
+    played: bool,
     prose: String,
     language: &'static str,
     voice: String,
