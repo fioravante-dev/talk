@@ -72,9 +72,10 @@ enum Cmd {
     /// Cala a fala de agora e esvazia a fila.
     #[cfg(unix)]
     Hush,
-    /// Fala de novo a última fala (o mesmo que clicar no ícone da bandeja).
+    /// Fala de novo a última fala (o mesmo que clicar no ícone da bandeja),
+    /// ou uma do histórico pelo id (`talk-rs again 20261124-143210-123`).
     #[cfg(unix)]
-    Again,
+    Again { id: Option<String> },
     /// Em que fase o serviço está.
     Status,
     /// Atualiza para a última versão publicada; o talk reinicia sozinho.
@@ -143,9 +144,9 @@ fn main() -> Result<()> {
             Ok(())
         }
         #[cfg(unix)]
-        Cmd::Again => {
-            if !service::request(&service::Request::new("again"))?.ok {
-                bail!("ainda não há fala para repetir");
+        Cmd::Again { id } => {
+            if !service::request(&service::Request { text: id, ..service::Request::new("again") })?.ok {
+                bail!("não achei essa fala para repetir");
             }
             Ok(())
         }

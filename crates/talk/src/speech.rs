@@ -21,6 +21,7 @@ use anyhow::{Context, Result, anyhow};
 use talk_core::config::Config;
 use talk_core::paths;
 use talk_core::speech::{self, Say};
+use talk_core::spoken::{self, Spoken};
 
 /// O script do trabalhador vai dentro do binário: atualizar o talk atualiza os dois.
 const WORKER_PY: &str = include_str!("speech_worker.py");
@@ -91,9 +92,10 @@ impl Drop for Worker {
     }
 }
 
-/// O áudio pronto de uma fala: guardado para tocar no foco e para repetir.
+/// O áudio pronto de uma fala, já no histórico (`id`).
 #[derive(Clone)]
 struct Clip {
+    id: String,
     rate: u32,
     samples: Arc<Vec<f32>>,
 }
@@ -111,6 +113,11 @@ struct Utterance {
     text: String,
     generation: u64,
     target: Target,
+    /// O título da conversa do T3 de onde veio, para o histórico.
+    thread: Option<String>,
+    /// Gerada de novo para uma fala do histórico cujo áudio já saiu: grava
+    /// o áudio com o id dela, sem linha nova.
+    redo: Option<String>,
 }
 
 #[derive(Clone)]
@@ -127,13 +134,17 @@ pub struct Speech {
     /// O áudio pronto de cada conversa do T3 que espera a janela dela ganhar
     /// foco: só o último de cada uma, que o anterior já envelheceu.
     pending: Arc<Mutex<HashMap<String, (Clip, Instant)>>>,
-    /// A última fala que tocou, para o "falar de novo" da bandeja.
-    last: Arc<Mutex<Option<Clip>>>,
+    /// O id da última fala que tocou, para o "falar de novo" da bandeja.
+    last: Arc<Mutex<Option<String>>>,
+    /// Quem quer saber de cada fala nova no histórico (a bandeja).
+    on_spoken: Arc<Mutex<Option<OnSpoken>>>,
     /// O título da janela do T3 em foco, ou `None`.
     focused: Arc<Mutex<Option<String>>>,
     /// O vigia do foco subiu (é o COSMIC). Sem ele, `focus` vira `always`.
     watching: Arc<AtomicBool>,
 }
+
+type OnSpoken = Box<dyn Fn() + Send>;
 
 /// Uma fala esperando o foco há mais que isto já não interessa.
 const PENDING_TTL: Duration = Duration::from_secs(3600);
@@ -150,6 +161,7 @@ impl Speech {
             worker: Arc::new(Mutex::new(None)),
             pending: Arc::new(Mutex::new(HashMap::new())),
             last: Arc::new(Mutex::new(None)),
+            on_spoken: Arc::new(Mutex::new(None)),
             focused: Arc::new(Mutex::new(None)),
             watching: Arc::new(AtomicBool::new(false)),
         };
@@ -174,7 +186,12 @@ impl Speech {
 
     /// Põe na fila e volta logo: quem chama (o Claude) não espera a fala acabar.
     pub fn enqueue(&self, text: String) {
-        self.push(text, Target::Play);
+        self.push(text, Target::Play, None);
+    }
+
+    /// Chamado a cada fala nova no histórico.
+    pub fn on_spoken(&self, f: impl Fn() + Send + 'static) {
+        *lock(&self.on_spoken) = Some(Box::new(f));
     }
 
     /// A fala de uma conversa do T3 (`thread` é o título dela). Com
@@ -183,15 +200,15 @@ impl Speech {
     /// guardado, e toca quando a conversa ganhar foco.
     pub fn enqueue_for_thread(&self, thread: String, text: String, when: &str) {
         if when != "focus" || !self.watching.load(Ordering::SeqCst) || self.shows(&thread) {
-            self.enqueue(text);
+            self.push(text, Target::Play, Some(thread));
         } else {
-            self.push(text, Target::Hold(thread));
+            self.push(text, Target::Hold(thread.clone()), Some(thread));
         }
     }
 
-    fn push(&self, text: String, target: Target) {
+    fn push(&self, text: String, target: Target, thread: Option<String>) {
         let generation = self.generation.load(Ordering::SeqCst);
-        let _ = self.queue.send(Utterance { text, generation, target });
+        let _ = self.queue.send(Utterance { text, generation, target, thread, redo: None });
     }
 
     fn shows(&self, thread: &str) -> bool {
@@ -218,10 +235,34 @@ impl Speech {
         }
     }
 
-    /// "Falar de novo" (a bandeja, `talk-rs again`): a última fala que tocou.
+    /// "Falar de novo" (o ícone da bandeja, `talk-rs again`): a última fala
+    /// que tocou; depois de reiniciar, a mais nova do histórico.
     pub fn replay(&self) -> bool {
-        let Some(clip) = lock(&self.last).clone() else { return false };
-        self.play_in_background(clip);
+        let id = lock(&self.last).clone().or_else(|| spoken::read(&spoken::file(), 1).pop().map(|s| s.id));
+        id.is_some_and(|id| self.play_entry(&id))
+    }
+
+    /// Toca uma fala do histórico: o áudio guardado, ou, se ele já saiu, a
+    /// fala gerada de novo a partir do texto. `false` = id desconhecido.
+    pub fn play_entry(&self, id: &str) -> bool {
+        let Some(entry) = spoken::find(&spoken::file(), id) else { return false };
+        let path = spoken::clip_path(id);
+        if path.exists() {
+            let me = self.clone();
+            let generation = self.generation.load(Ordering::SeqCst);
+            let id = id.to_owned();
+            thread::spawn(move || me.play_file(&path, &id, generation));
+        } else {
+            let generation = self.generation.load(Ordering::SeqCst);
+            let thread = (!entry.thread.is_empty()).then_some(entry.thread);
+            let _ = self.queue.send(Utterance {
+                text: entry.text,
+                generation,
+                target: Target::Play,
+                thread,
+                redo: Some(entry.id),
+            });
+        }
         true
     }
 
@@ -263,14 +304,12 @@ impl Speech {
     }
 
     fn run(&self, u: Utterance) -> Result<()> {
+        let live = matches!(u.target, Target::Play);
+        let Some((samples, rate, made)) = self.synthesize(&u.text, u.generation, live)? else { return Ok(()) };
+        let clip = self.record(samples, rate, made, u.thread.as_deref(), u.redo)?;
         match u.target {
-            Target::Play => {
-                if let Some(clip) = self.synthesize(&u.text, u.generation, true)? {
-                    *lock(&self.last) = Some(clip);
-                }
-            }
+            Target::Play => *lock(&self.last) = Some(clip.id),
             Target::Hold(thread) => {
-                let Some(clip) = self.synthesize(&u.text, u.generation, false)? else { return Ok(()) };
                 if self.cancelled(u.generation) {
                     return Ok(());
                 }
@@ -288,9 +327,40 @@ impl Speech {
         Ok(())
     }
 
+    /// Guarda a fala no histórico: o texto numa linha, o áudio num WAV (e
+    /// limpa os áudios velhos). `redo` regrava o áudio de uma fala antiga.
+    fn record(&self, samples: Vec<f32>, rate: u32, made: Made, thread: Option<&str>, redo: Option<String>) -> Result<Clip> {
+        let cfg = Config::load(&paths::config_file()).unwrap_or_default();
+        let fresh = redo.is_none();
+        let id = redo.unwrap_or_else(spoken::new_id);
+        spoken::write_wav(&spoken::clip_path(&id), rate, &samples)?;
+        if fresh {
+            spoken::append(
+                &spoken::file(),
+                &Spoken {
+                    id: id.clone(),
+                    at: talk_core::history::now(),
+                    thread: thread.unwrap_or_default().to_owned(),
+                    language: made.language.into(),
+                    voice: made.voice,
+                    seconds: samples.len() as f64 / f64::from(rate.max(1)),
+                    text: made.prose,
+                },
+            )?;
+        }
+        let keep = cfg.speech_audio_keep().unwrap_or(Some(Duration::from_secs(7 * 86_400)));
+        if let Err(e) = spoken::prune_clips(&spoken::clips_dir(), keep, cfg.speech_audio_max_mb * 1_048_576) {
+            eprintln!("[speech] limpando os áudios: {e:#}");
+        }
+        if fresh && let Some(f) = lock(&self.on_spoken).as_ref() {
+            f();
+        }
+        Ok(Clip { id, rate, samples: Arc::new(samples) })
+    }
+
     /// Gera a fala inteira. Com `live`, toca enquanto gera (o 1º som sai em
     /// ~0,2 s); sem, só junta o áudio. `None` = cancelada ou vazia.
-    fn synthesize(&self, text: &str, generation: u64, live: bool) -> Result<Option<Clip>> {
+    fn synthesize(&self, text: &str, generation: u64, live: bool) -> Result<Option<(Vec<f32>, u32, Made)>> {
         let cfg = Config::load(&paths::config_file()).unwrap_or_default();
         let prose = speech::to_speech(text);
         if prose.is_empty() {
@@ -373,7 +443,7 @@ impl Speech {
         if self.cancelled(generation) || samples.is_empty() {
             return Ok(None);
         }
-        Ok(Some(Clip { rate, samples: Arc::new(samples) }))
+        Ok(Some((samples, rate, Made { prose, language, voice: speaker })))
     }
 
     /// Toca um áudio pronto numa thread: quem avisa (o vigia, a bandeja) não espera.
@@ -395,9 +465,33 @@ impl Speech {
                 let _ = out.write_all(&f32_bytes(&clip.samples));
                 drop(out);
                 self.wait_player();
-                *lock(&self.last) = Some(clip.clone());
+                *lock(&self.last) = Some(clip.id.clone());
             }
             Err(e) => eprintln!("[speech] {e:#}"),
+        }
+        self.speaking.store(false, Ordering::SeqCst);
+    }
+
+    /// Toca o WAV de uma fala do histórico, na vez dele.
+    fn play_file(&self, path: &std::path::Path, id: &str, generation: u64) {
+        let _turn = lock(&self.speaker);
+        if self.cancelled(generation) {
+            return;
+        }
+        self.speaking.store(true, Ordering::SeqCst);
+        match Command::new("pw-play")
+            .args(["--media-role", "Communication"])
+            .arg(path)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+        {
+            Ok(child) => {
+                *lock(&self.player) = Some(child);
+                self.wait_player();
+                *lock(&self.last) = Some(id.to_owned());
+            }
+            Err(e) => eprintln!("[speech] não deu para abrir o pw-play: {e}"),
         }
         self.speaking.store(false, Ordering::SeqCst);
     }
@@ -454,6 +548,13 @@ impl Speech {
             }
         });
     }
+}
+
+/// O que a síntese decidiu, para o histórico.
+struct Made {
+    prose: String,
+    language: &'static str,
+    voice: String,
 }
 
 fn f32_bytes(samples: &[f32]) -> Vec<u8> {

@@ -13,6 +13,7 @@
     <span class="mark">talk</span>
     <nav aria-label="Telas">
       <a href="/historico" hx-get="/historico" hx-push-url="false" {% if shell.tab == "historico" %}class="on" aria-current="page"{% endif %}>histórico</a>
+      <a href="/falas" hx-get="/falas" hx-push-url="false" {% if shell.tab == "falas" %}class="on" aria-current="page"{% endif %}>falas</a>
       <a href="/vocabulario" hx-get="/vocabulario" hx-push-url="false" {% if shell.tab == "vocabulario" %}class="on" aria-current="page"{% endif %}>vocabulário</a>
       <a href="/ajustes" hx-get="/ajustes" hx-push-url="false" {% if shell.tab == "ajustes" %}class="on" aria-current="page"{% endif %}>ajustes</a>
     </nav>

@@ -6,7 +6,7 @@
 use std::sync::mpsc::Sender;
 
 pub use ksni::blocking::{Handle, TrayMethods};
-use ksni::menu::StandardItem;
+use ksni::menu::{StandardItem, SubMenu};
 use ksni::{Icon, MenuItem};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -16,11 +16,13 @@ pub enum Look {
     Transcribing,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Action {
     Toggle,
     /// Fala de novo a última fala.
     Again,
+    /// Toca uma fala do histórico (o id dela).
+    Play(String),
     Open,
     CopyLast,
     Update,
@@ -33,6 +35,8 @@ pub struct Tray {
     pub tooltip: String,
     /// A versão nova que espera: aparece "Atualizar para ..." no menu.
     pub update: Option<String>,
+    /// As últimas falas, (id, rótulo), a mais nova primeiro.
+    pub recent: Vec<(String, String)>,
     pub actions: Sender<Action>,
 }
 
@@ -80,20 +84,30 @@ impl ksni::Tray for Tray {
             StandardItem {
                 label: label.into(),
                 activate: Box::new(move |t: &mut Self| {
-                    let _ = t.actions.send(action);
+                    let _ = t.actions.send(action.clone());
                 }),
                 ..Default::default()
             }
             .into()
         };
         let toggle = if matches!(self.look, Look::Recording { .. }) { "Parar e colar" } else { "Ditar" };
-        let mut menu = vec![
-            item("Falar de novo", Action::Again),
+        let mut menu = vec![item("Falar de novo", Action::Again)];
+        if !self.recent.is_empty() {
+            menu.push(
+                SubMenu {
+                    label: "Últimas falas".into(),
+                    submenu: self.recent.iter().map(|(id, label)| item(label, Action::Play(id.clone()))).collect(),
+                    ..Default::default()
+                }
+                .into(),
+            );
+        }
+        menu.extend([
             item(toggle, Action::Toggle),
             item("Abrir talk", Action::Open),
             item("Copiar a última ditada", Action::CopyLast),
             MenuItem::Separator,
-        ];
+        ]);
         if let Some(v) = &self.update {
             menu.push(item(&format!("Atualizar para {v}"), Action::Update));
         }

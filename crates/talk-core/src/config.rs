@@ -59,6 +59,12 @@ pub struct Config {
     /// `focus`: a fala de uma conversa do T3 espera a janela do T3 estar em
     /// foco mostrando aquela conversa (no COSMIC); `always`: fala na hora.
     pub speech_when: String,
+    /// Por quanto tempo o áudio das falas fica guardado (`7d`, `12h`,
+    /// `never` = para sempre). O texto fica sempre; sem o áudio, a fala é
+    /// gerada de novo a partir dele.
+    pub speech_audio_keep: String,
+    /// O teto da pasta dos áudios, em MB: passando, os mais antigos saem.
+    pub speech_audio_max_mb: u64,
 }
 
 /// O Super+D é do Windows (mostra a área de trabalho) e não pode ser registrado.
@@ -94,6 +100,8 @@ impl Default for Config {
             speech_keep_alive: "30m".into(),
             speech_python: String::new(),
             speech_when: "focus".into(),
+            speech_audio_keep: "7d".into(),
+            speech_audio_max_mb: 200,
         }
     }
 }
@@ -127,6 +135,11 @@ impl Config {
     /// `None` = o trabalhador da fala nunca sai.
     pub fn speech_keep_alive(&self) -> Result<Option<Duration>> {
         parse_duration(&self.speech_keep_alive)
+    }
+
+    /// `None` = o áudio das falas nunca sai por idade.
+    pub fn speech_audio_keep(&self) -> Result<Option<Duration>> {
+        parse_duration(&self.speech_audio_keep)
     }
 
     /// A voz para o idioma (`pt`/`en`); outro idioma fica com a do português.
@@ -242,7 +255,8 @@ pub fn parse_duration(text: &str) -> Result<Option<Duration>> {
         "" | "s" => n,
         "m" => n * 60.0,
         "h" => n * 3600.0,
-        _ => bail!("duração inválida: {text:?} (use 30s, 5m, 1h, 0 ou never)"),
+        "d" => n * 86_400.0,
+        _ => bail!("duração inválida: {text:?} (use 30s, 5m, 1h, 7d, 0 ou never)"),
     };
     if secs < 0.0 {
         bail!("duração negativa: {text:?}");

@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block main %}
+<div class="history">
+  <form class="search" role="search" hx-get="/falas" hx-trigger="input changed delay:200ms from:find input, submit">
+    <label class="sr" for="q">Buscar nas falas</label>
+    <input id="q" type="search" name="q" value="{{ query }}" placeholder="buscar nas falas" autocomplete="off">
+    <span class="count">{{ total }} falas{% if !query.is_empty() %} com “{{ query }}”{% endif %} · o áudio fica {{ keep }}, o texto para sempre</span>
+  </form>
+  <div class="scale-head" aria-hidden="true"><span>fala</span><span class="scale-legend">a barra cheia = {{ scale_label }}</span></div>
+  {% if days.is_empty() %}
+  <p class="empty">{% if query.is_empty() %}Nenhuma fala ainda. O Claude fala no fim de cada resposta com <code>talk-rs speak</code>.{% else %}Nada com “{{ query }}”.{% endif %}</p>
+  {% endif %}
+  {% for day in days %}
+  <section aria-label="{{ day.label }}">
+    <h2>{{ day.label }}</h2>
+    <ol class="entries">
+      {% for e in day.entries %}
+      <li class="entry{% if e.playing %} copied{% endif %}">
+        <time>{{ e.time }}</time>
+        <div class="dur" title="{{ e.audio }}"><i style="width: {{ e.bar }}%"></i></div>
+        <p class="text">{{ e.text }}</p>
+        <span class="meta">{% if !e.thread.is_empty() %}{{ e.thread }} · {% endif %}{{ e.audio }} · {{ e.voice }}{% if !e.saved %} · sem áudio guardado: gera de novo{% endif %}</span>
+        <form hx-post="/falas/tocar">
+          <input type="hidden" name="id" value="{{ e.id }}">
+          <input type="hidden" name="q" value="{{ query }}">
+          <button type="submit" aria-label="tocar">{% if e.playing %}tocando{% else %}▶ tocar{% endif %}</button>
+        </form>
+      </li>
+      {% endfor %}
+    </ol>
+  </section>
+  {% endfor %}
+</div>
+{% endblock %}

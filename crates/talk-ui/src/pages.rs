@@ -9,6 +9,7 @@ use anyhow::{Context, Result};
 use askama::Template;
 use talk_core::config::{self, Config};
 use talk_core::history;
+use talk_core::spoken;
 use talk_core::keys::Combo;
 use talk_core::paths;
 use talk_core::update::{self, Method};
@@ -525,6 +526,105 @@ pub fn historico(query: &str, copied: Option<&str>) -> Result<String> {
         scale_label: if scale >= 60.0 { format!("{} min", scale / 60.0) } else { format!("{scale} s") },
     }
     .render()?)
+}
+
+// ------------------------------------------------------------ falas
+
+pub struct SpokenRow {
+    pub id: String,
+    pub time: String,
+    pub text: String,
+    pub thread: String,
+    pub voice: String,
+    pub audio: String,
+    pub bar: u32,
+    /// O áudio ainda está guardado (senão o ▶ gera de novo).
+    pub saved: bool,
+    pub playing: bool,
+}
+
+pub struct SpokenDay {
+    pub label: String,
+    pub entries: Vec<SpokenRow>,
+}
+
+#[derive(Template)]
+#[template(path = "falas.html")]
+pub struct Falas {
+    pub shell: Shell,
+    pub query: String,
+    pub total: usize,
+    pub days: Vec<SpokenDay>,
+    pub scale_label: String,
+    pub keep: String,
+}
+
+pub fn falas(query: &str, playing: Option<&str>) -> Result<String> {
+    let q = query.trim().to_lowercase();
+    let all = spoken::read(&spoken::file(), 5000);
+    let matched: Vec<_> = all
+        .into_iter()
+        .filter(|s| q.is_empty() || s.text.to_lowercase().contains(&q) || s.thread.to_lowercase().contains(&q))
+        .collect();
+    let total = matched.len();
+    let shown: Vec<_> = matched.into_iter().take(300).collect();
+    let scale = scale_for_all(&shown.iter().map(|s| s.seconds).collect::<Vec<_>>());
+    let now = chrono::Local::now().date_naive();
+    let today = now.format("%Y-%m-%d").to_string();
+    let yesterday = now.pred_opt().map(|d| d.format("%Y-%m-%d").to_string()).unwrap_or_default();
+
+    let mut days: Vec<SpokenDay> = vec![];
+    for s in shown {
+        let (date, time) = s.at.split_once('T').unwrap_or((s.at.as_str(), ""));
+        let label = day_label(date, &today, &yesterday);
+        let row = SpokenRow {
+            playing: playing == Some(s.id.as_str()),
+            saved: spoken::clip_path(&s.id).exists(),
+            time: time.get(..5).unwrap_or(time).to_owned(),
+            bar: ((s.seconds / scale) * 100.0).clamp(0.0, 100.0).round() as u32,
+            audio: secs(s.seconds),
+            thread: s.thread,
+            voice: s.voice,
+            text: s.text,
+            id: s.id,
+        };
+        match days.last_mut() {
+            Some(d) if d.label == label => d.entries.push(row),
+            _ => days.push(SpokenDay { label, entries: vec![row] }),
+        }
+    }
+    let cfg = Config::load(&paths::config_file()).unwrap_or_default();
+    let keep = match cfg.speech_audio_keep.trim() {
+        "never" | "-1" => "para sempre".to_owned(),
+        k => {
+            let (n, unit) = k.split_at(k.find(|c: char| c.is_ascii_alphabetic()).unwrap_or(k.len()));
+            let unit = match (unit, n.trim() == "1") {
+                ("d", true) => "dia",
+                ("d", false) => "dias",
+                ("h", true) => "hora",
+                ("h", false) => "horas",
+                ("m", _) => "min",
+                _ => "s",
+            };
+            format!("por {} {unit}", n.trim())
+        }
+    };
+    Ok(Falas {
+        shell: shell("falas"),
+        query: query.trim().to_owned(),
+        total,
+        days,
+        scale_label: if scale >= 60.0 { format!("{} min", scale / 60.0) } else { format!("{scale} s") },
+        keep,
+    }
+    .render()?)
+}
+
+pub fn tocar(form: &HashMap<String, String>) -> Result<String> {
+    let id = form.get("id").cloned().unwrap_or_default();
+    let query = form.get("q").cloned().unwrap_or_default();
+    system::play_spoken(&id)?;
+    falas(&query, Some(&id))
 }
 
 pub fn copiar(form: &HashMap<String, String>) -> Result<String> {

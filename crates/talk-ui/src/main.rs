@@ -82,6 +82,8 @@ fn route(req: &Request<Vec<u8>>) -> Response<Cow<'static, [u8]>> {
         (false, "/ajustes") => pages::ajustes(),
         (false, "/" | "/historico") => pages::historico(query.get("q").map_or("", String::as_str), None),
         (false, "/vocabulario") => pages::vocabulario("", ""),
+        (false, "/falas") => pages::falas(query.get("q").map_or("", String::as_str), None),
+        (true, "/falas/tocar") => pages::tocar(&form),
         (true, "/historico/copiar") => pages::copiar(&form),
         (true, p) if p.starts_with("/ajustes/") => pages::ajustar(&p["/ajustes/".len()..], &form),
         (true, p) if p.starts_with("/vocabulario/") => pages::vocab_action(&p["/vocabulario/".len()..], &form),
@@ -138,6 +140,7 @@ fn dump(dir: &std::path::Path) -> anyhow::Result<()> {
     for (name, html) in [
         ("ajustes", pages::ajustes()?),
         ("historico", pages::historico("", None)?),
+        ("falas", pages::falas("", None)?),
         ("vocabulario", pages::vocabulario("", "")?),
     ] {
         std::fs::write(dir.join(format!("{name}.html")), html.replace("\"/assets/", "\"assets/").replace("(\"/assets/", "(\"assets/"))?;

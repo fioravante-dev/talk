@@ -487,7 +487,10 @@ impl Service {
             },
             #[cfg(unix)]
             "again" => Reply {
-                ok: self.speech.replay(),
+                ok: match req.text.as_deref().filter(|id| !id.is_empty()) {
+                    Some(id) => self.speech.play_entry(id),
+                    None => self.speech.replay(),
+                },
                 phase: lock(&self.phase).name().into(),
                 ..Reply::default()
             },
@@ -536,6 +539,15 @@ impl Service {
         writeln!(out, "{}", serde_json::to_string(&reply)?)?;
         Ok(())
     }
+}
+
+/// As 5 últimas falas para o menu da bandeja: (id, rótulo).
+#[cfg(unix)]
+fn recent_spoken() -> Vec<(String, String)> {
+    talk_core::spoken::read(&talk_core::spoken::file(), 5)
+        .iter()
+        .map(|s| (s.id.clone(), talk_core::spoken::label(s, 60)))
+        .collect()
 }
 
 /// Um binário do talk ao lado deste (`talk-ui`, `talk-pill`), com o `.exe` no Windows.
@@ -635,6 +647,8 @@ pub fn serve() -> Result<()> {
                 look: Look::Idle,
                 tooltip: "pronto".into(),
                 update: UpdateState::load().available().map(str::to_owned),
+                #[cfg(unix)]
+                recent: recent_spoken(),
                 actions: tx.clone(),
             }).spawn() {
                 Ok(h) => {
@@ -665,8 +679,12 @@ pub fn serve() -> Result<()> {
                 #[cfg(unix)]
                 Action::Again => {
                     if !me.speech.replay() {
-                        notify("talk", "Ainda não falei nada desde que subi.");
+                        notify("talk", "Ainda não há fala para repetir.");
                     }
+                }
+                #[cfg(unix)]
+                Action::Play(id) => {
+                    me.speech.play_entry(&id);
                 }
                 Action::Open => {
                     if let Err(e) = open_window() {
@@ -688,6 +706,17 @@ pub fn serve() -> Result<()> {
             }
         }
     });
+    // Cada fala nova entra no menu "Últimas falas".
+    #[cfg(unix)]
+    {
+        let me = service.clone();
+        service.speech.on_spoken(move || {
+            if let Some(h) = lock(&me.tray).as_ref() {
+                let recent = recent_spoken();
+                h.update(|t| t.recent = recent);
+            }
+        });
+    }
     service.reap();
     service.watch_updates();
     crate::remote::spawn(service.clone());

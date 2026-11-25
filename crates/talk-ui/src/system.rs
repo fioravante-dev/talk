@@ -114,3 +114,18 @@ pub fn copy(text: &str) -> anyhow::Result<()> {
     child.wait()?;
     Ok(())
 }
+
+/// Pede ao serviço que toque uma fala do histórico (`talk-rs again <id>`).
+pub fn play_spoken(id: &str) -> anyhow::Result<()> {
+    let s = UnixStream::connect(paths::socket()).map_err(|_| anyhow::anyhow!("o serviço não está rodando"))?;
+    s.set_read_timeout(Some(Duration::from_secs(4)))?;
+    let mut out = &s;
+    writeln!(out, "{}", serde_json::json!({"cmd": "again", "text": id}))?;
+    let mut line = String::new();
+    BufReader::new(&s).read_line(&mut line)?;
+    let v: Value = serde_json::from_str(&line)?;
+    match v["ok"].as_bool() {
+        Some(true) => Ok(()),
+        _ => anyhow::bail!("o serviço não achou essa fala"),
+    }
+}

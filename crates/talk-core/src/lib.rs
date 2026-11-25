@@ -12,6 +12,7 @@ pub mod keys;
 pub mod resample;
 pub mod shortcuts;
 pub mod speech;
+pub mod spoken;
 pub mod update;
 pub mod vocab;
 pub mod wav;
