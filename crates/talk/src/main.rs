@@ -20,11 +20,11 @@ mod output;
 mod remote;
 mod service;
 mod stt;
-#[cfg(unix)]
+#[cfg_attr(windows, path = "focus_win.rs")]
 mod focus;
-#[cfg(unix)]
+#[cfg_attr(windows, path = "player_win.rs")]
+mod player;
 mod speech;
-#[cfg(unix)]
 mod t3;
 #[cfg_attr(windows, path = "tray_win.rs")]
 mod tray;
@@ -64,7 +64,6 @@ enum Cmd {
         language: Option<String>,
     },
     /// Fala o texto (ou o stdin) e volta na hora; as falas fazem fila.
-    #[cfg(unix)]
     Speak {
         /// O título da conversa do T3 de onde vem a fala. Sem isto, o do
         /// `T3CODE_THREAD_ID` (quem repassa de outra máquina manda o de lá).
@@ -74,17 +73,14 @@ enum Cmd {
         text: Vec<String>,
     },
     /// Cala a fala de agora e esvazia a fila.
-    #[cfg(unix)]
     Hush,
     /// Liga ou desliga a fala (o mesmo que "Fala ligada" na bandeja).
-    #[cfg(unix)]
     Speech {
         #[arg(value_parser = ["on", "off"])]
         state: String,
     },
     /// Fala de novo a última fala (o mesmo que clicar no ícone da bandeja),
     /// ou uma do histórico pelo id (`talk-rs again 20261124-143210-123`).
-    #[cfg(unix)]
     Again { id: Option<String> },
     /// Em que fase o serviço está.
     Status,
@@ -135,7 +131,6 @@ fn main() -> Result<()> {
             println!("atalhos registrados");
             Ok(())
         }
-        #[cfg(unix)]
         Cmd::Speak { thread, text } => {
             let text = if text.is_empty() {
                 std::io::read_to_string(std::io::stdin())?
@@ -153,14 +148,12 @@ fn main() -> Result<()> {
             }
             Ok(())
         }
-        #[cfg(unix)]
         Cmd::Again { id } => {
             if !service::request(&service::Request { text: id, ..service::Request::new("again") })?.ok {
                 bail!("não achei essa fala para repetir");
             }
             Ok(())
         }
-        #[cfg(unix)]
         Cmd::Speech { state } => {
             let reply = service::request(&service::Request { text: Some(state), ..service::Request::new("speech") })?;
             if let Some(e) = reply.error {
@@ -168,7 +161,6 @@ fn main() -> Result<()> {
             }
             Ok(())
         }
-        #[cfg(unix)]
         Cmd::Hush => {
             service::request(&service::Request::new("hush"))?;
             Ok(())

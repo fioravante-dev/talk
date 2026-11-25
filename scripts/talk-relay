@@ -1,0 +1,166 @@
+#!/usr/bin/env python3
+"""talk-rs numa máquina sem o talk: repassa a fala ao PC que a pessoa está usando.
+
+    install -m 755 scripts/talk-relay ~/.local/bin/talk-rs
+    talk-rs speak "Pronto, terminei."     # o texto também pode vir do stdin
+    talk-rs hush | again | status
+
+Para o Claude de uma máquina sem placa (o celular, um servidor) falar pelo
+alto-falante de um PC. Pergunta a cada talk da tailnet (`GET /speech/presence`,
+o servidor do `listen`) há quanto tempo a pessoa usou aquele PC com o T3 na
+frente, e manda a fala só para o mais recente: o áudio é gerado num lugar só.
+Se ninguém usou um PC nos últimos `TALK_RECENT` segundos (padrão 600), a
+pessoa está longe (no celular): não fala em lugar nenhum.
+
+Dentro de uma conversa do T3, manda junto o título dela (lido do banco do T3
+daqui), e a fala espera aquela conversa ganhar foco lá.
+
+Variáveis: TALK_HOSTS ("ip:porta ip:porta"; sem isto, os PCs online do
+`tailscale status`, na porta 7878), TALK_TOKEN (o `listen_token`, se houver),
+TALK_RECENT.
+"""
+
+import json
+import os
+import sqlite3
+import subprocess
+import sys
+import threading
+import urllib.request
+
+PORT = 7878
+RECENT = int(os.environ.get("TALK_RECENT", "600"))
+TOKEN = os.environ.get("TALK_TOKEN", "")
+
+
+def hosts():
+    given = os.environ.get("TALK_HOSTS", "").split()
+    if given:
+        return given
+    try:
+        out = subprocess.run(["tailscale", "status", "--json"], capture_output=True, timeout=5).stdout
+        status = json.loads(out)
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return []
+    found = []
+    for node in status.get("Peer", {}).values():
+        # Só PCs: o celular e os servidores sem o talk não respondem mesmo,
+        # mas pular os outros sistemas poupa a espera.
+        if node.get("Online") and node.get("OS") in ("linux", "windows", "macOS"):
+            ip = next((i for i in node.get("TailscaleIPs", []) if ":" not in i), None)
+            if ip:
+                found.append(f"{ip}:{PORT}")
+    return found
+
+
+def call(host, path, body=None, timeout=1.5):
+    req = urllib.request.Request(f"http://{host}{path}", method="POST" if body is not None else "GET")
+    if TOKEN:
+        req.add_header("Authorization", f"Bearer {TOKEN}")
+    data = None
+    if body is not None:
+        data = json.dumps(body).encode()
+        req.add_header("Content-Type", "application/json")
+    try:
+        with urllib.request.urlopen(req, data=data, timeout=timeout) as r:
+            return json.loads(r.read() or b"{}")
+    except (OSError, ValueError):
+        return None
+
+
+def presences():
+    """{host: resposta do /speech/presence}, perguntando a todos ao mesmo tempo."""
+    got = {}
+
+    def ask(h):
+        r = call(h, "/speech/presence")
+        if r is not None:
+            got[h] = r
+
+    threads = [threading.Thread(target=ask, args=(h,)) for h in hosts()]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    return got
+
+
+def nearest(recent=RECENT):
+    """O PC com a fala que a pessoa usou por último, se foi há pouco."""
+    best = None
+    for host, p in presences().items():
+        secs = p.get("present_secs")
+        if p.get("speech") and secs is not None and secs <= recent:
+            if best is None or secs < best[1]:
+                best = (host, secs, p.get("host", host))
+    return best
+
+
+def thread_title():
+    """O título da conversa do T3 de onde isto foi chamado; vazio fora do T3."""
+    tid = os.environ.get("T3CODE_THREAD_ID")
+    if not tid:
+        return ""
+    home = os.environ.get("T3CODE_HOME") or os.path.join(os.path.expanduser("~"), ".t3")
+    try:
+        db = sqlite3.connect(f"file:{home}/userdata/statev2.sqlite?mode=ro", uri=True)
+        row = db.execute("SELECT title FROM orchestration_v2_projection_threads WHERE thread_id = ?", (tid,)).fetchone()
+        return row[0] if row and row[0] else ""
+    except sqlite3.Error:
+        return ""
+
+
+def speak(args):
+    thread = None
+    if len(args) >= 2 and args[0] == "--thread":
+        thread, args = args[1], args[2:]
+    elif any(a.startswith("-") for a in args[:1]):
+        print("uso: talk-rs speak [--thread TÍTULO] [texto...]  (sem texto, lê do stdin)", file=sys.stderr)
+        return 2
+    text = " ".join(args) if args else sys.stdin.read()
+    if not text.strip():
+        print("nada para falar", file=sys.stderr)
+        return 1
+    target = nearest()
+    if target is None:
+        print("ninguém num PC agora: a fala fica para a próxima", file=sys.stderr)
+        return 0
+    host, _, name = target
+    body = {"text": text, "thread": thread if thread is not None else thread_title()}
+    if call(host, "/speech/speak", body, timeout=5) is None:
+        print(f"{name} não respondeu", file=sys.stderr)
+        return 1
+    return 0
+
+
+def main():
+    args = sys.argv[1:]
+    cmd = args[0] if args else ""
+    if cmd == "speak":
+        return speak(args[1:])
+    if cmd == "hush":
+        for h in presences():
+            call(h, "/speech/hush", {})
+        return 0
+    if cmd == "again":
+        target = nearest(recent=10**9)
+        if target is None or not (call(target[0], "/speech/again", {}) or {}).get("ok"):
+            print("não achei fala para repetir", file=sys.stderr)
+            return 1
+        return 0
+    if cmd == "status":
+        found = presences()
+        if not found:
+            print("nenhum talk respondeu na tailnet")
+        for h, p in sorted(found.items()):
+            secs = p.get("present_secs")
+            when = "nunca" if secs is None else ("agora" if secs == 0 else f"há {secs} s")
+            fala = "fala ligada" if p.get("speech") else "sem fala"
+            print(f"{p.get('host', h)} ({h}): {fala}, usado com o T3 {when}")
+        return 0
+    print("talk-relay: speak | hush | again | status", file=sys.stderr)
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main())

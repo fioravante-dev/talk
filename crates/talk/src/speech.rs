@@ -1,4 +1,5 @@
-//! A fala: `talk-rs speak "texto"` → prosa → frases → Qwen3-TTS → `pw-play`.
+//! A fala: `talk-rs speak "texto"` → prosa → frases → Qwen3-TTS → alto-falante
+//! (`pw-play` no Linux, WASAPI no Windows: `player.rs`/`player_win.rs`).
 //!
 //! O mesmo desenho do ditado ao contrário. O serviço nunca toca na CUDA: quem
 //! toca é um trabalhador em Python (o `faster-qwen3-tts` só existe lá), que sobe
@@ -9,9 +10,11 @@
 use std::collections::HashMap;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
-use std::io::{BufReader, BufWriter, Write};
+use std::io::{BufReader, BufWriter};
 use std::path::PathBuf;
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
+
+use crate::player::{self, Player};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, mpsc};
 use std::thread;
@@ -38,13 +41,19 @@ fn speech_dir() -> PathBuf {
 
 fn python(cfg: &Config) -> PathBuf {
     if cfg.speech_python.is_empty() {
-        speech_dir().join("venv/bin/python")
+        let venv = speech_dir().join("venv");
+        if cfg!(windows) { venv.join(r"Scripts\python.exe") } else { venv.join("bin/python") }
     } else {
         PathBuf::from(&cfg.speech_python)
     }
 }
 
 /// O processo Python, visto daqui.
+/// O ambiente da fala está instalado (o Python do `install`).
+pub fn installed(cfg: &Config) -> bool {
+    python(cfg).exists()
+}
+
 struct Worker {
     child: Child,
     stdin: BufWriter<ChildStdin>,
@@ -63,10 +72,13 @@ impl Worker {
         }
         let py = python(cfg);
         if !py.exists() {
-            anyhow::bail!("sem o ambiente da fala ({}): rode o scripts/install.sh", py.display());
+            anyhow::bail!("sem o ambiente da fala ({}): instale com TALK_SPEECH=1", py.display());
         }
         let log = std::fs::OpenOptions::new().create(true).append(true).open(dir.join("speech.log"))?;
-        let mut child = Command::new(&py)
+        let mut cmd = Command::new(&py);
+        #[cfg(windows)]
+        std::os::windows::process::CommandExt::creation_flags(&mut cmd, crate::worker::NO_WINDOW);
+        let mut child = cmd
             .arg(&script)
             .arg(&cfg.speech_model)
             .stdin(Stdio::piped())
@@ -125,8 +137,8 @@ pub struct Speech {
     queue: mpsc::Sender<Utterance>,
     generation: Arc<AtomicU64>,
     speaking: Arc<AtomicBool>,
-    /// O `pw-play` tocando agora: o `stop` o mata e o som para na hora.
-    player: Arc<Mutex<Option<Child>>>,
+    /// O som tocando agora: o `stop` o corta na hora.
+    player: Arc<Mutex<Option<Player>>>,
     /// Uma fala toca por vez: quem gera ao vivo e quem toca um áudio pronto
     /// (foco, repetir) passam por aqui.
     speaker: Arc<Mutex<()>>,
@@ -145,6 +157,11 @@ pub struct Speech {
     /// Gravando uma ditada: nada toca (o microfone pegaria a fala), e o que
     /// ficar pronto espera, guardado.
     dictating: Arc<AtomicBool>,
+    /// Ninguém mexe no PC há uns 30 s (`focus::IDLE_MS`).
+    idle: Arc<AtomicBool>,
+    /// A última vez que a pessoa estava aqui, com o T3 na frente: com dois
+    /// PCs, a fala vai para o que ela usou por último.
+    present_at: Arc<Mutex<Option<Instant>>>,
 }
 
 type OnSpoken = Box<dyn Fn() + Send>;
@@ -168,6 +185,8 @@ impl Speech {
             focused: Arc::new(Mutex::new(None)),
             watching: Arc::new(AtomicBool::new(false)),
             dictating: Arc::new(AtomicBool::new(false)),
+            idle: Arc::new(AtomicBool::new(false)),
+            present_at: Arc::new(Mutex::new(None)),
         };
         let generator = me.clone();
         thread::spawn(move || {
@@ -181,7 +200,10 @@ impl Speech {
         });
         me.reap();
         let watcher = me.clone();
-        match crate::focus::watch(Box::new(move |w| watcher.on_focus(w))) {
+        match crate::focus::watch(Box::new(move |seen| match seen {
+            crate::focus::Seen::Focus(w) => watcher.on_focus(w),
+            crate::focus::Seen::Idle(away) => watcher.on_idle(away),
+        })) {
             Ok(()) => me.watching.store(true, Ordering::SeqCst),
             Err(e) => eprintln!("[speech] sem vigia do foco ({e:#}): as falas tocam na hora"),
         }
@@ -222,6 +244,7 @@ impl Speech {
     /// O vigia avisou: o foco mudou. Se a janela agora mostra uma conversa
     /// com áudio esperando, ele toca.
     fn on_focus(&self, window: Option<&str>) {
+        self.mark_presence();
         *lock(&self.focused) = window.map(str::to_owned);
         let Some(window) = window else { return };
         if self.dictating() {
@@ -274,6 +297,32 @@ impl Speech {
     }
 
     /// Quantas falas esperam o foco (para o `status`).
+    fn on_idle(&self, away: bool) {
+        self.mark_presence();
+        self.idle.store(away, Ordering::SeqCst);
+    }
+
+    fn present_now(&self) -> bool {
+        lock(&self.focused).is_some() && !self.idle.load(Ordering::SeqCst)
+    }
+
+    /// Antes de cada mudança de foco ou de largado: se a pessoa estava aqui
+    /// até agora, anota.
+    fn mark_presence(&self) {
+        if self.present_now() {
+            *lock(&self.present_at) = Some(Instant::now());
+        }
+    }
+
+    /// Há quanto tempo a pessoa usou este PC com o T3 na frente: 0 se agora,
+    /// `None` se nunca (desde que o serviço subiu) ou sem vigia do foco.
+    pub fn presence(&self) -> Option<Duration> {
+        if self.present_now() {
+            return Some(Duration::ZERO);
+        }
+        lock(&self.present_at).map(|t| t.elapsed())
+    }
+
     /// A ditada começou ou acabou. No começo cala o que estiver tocando; no
     /// fim, toca o que ficou esperando pela conversa que está na tela.
     pub fn set_dictating(&self, on: bool) {
@@ -307,8 +356,7 @@ impl Speech {
         self.generation.fetch_add(1, Ordering::SeqCst);
         self.speaking.store(false, Ordering::SeqCst);
         if let Some(mut p) = lock(&self.player).take() {
-            let _ = p.kill();
-            let _ = p.wait();
+            p.kill();
         }
     }
 
@@ -396,7 +444,7 @@ impl Speech {
         let mut first_sound: Option<Duration> = None;
         let mut samples: Vec<f32> = vec![];
         let mut rate = 0;
-        let mut out: Option<ChildStdin> = None;
+        let mut out: Option<player::Sink> = None;
         // Ao vivo, segura o alto-falante a fala toda: um áudio pronto que
         // chegar no meio espera a vez.
         // Calada no meio (`stop`, a ditada), para de tocar mas termina de
@@ -449,8 +497,8 @@ impl Speech {
                         out = Some(self.open_player(rate)?);
                         first_sound = Some(started.elapsed());
                     }
-                    if out.as_mut().is_some_and(|o| o.write_all(&f32_bytes(&audio)).is_err()) {
-                        out = None; // o pw-play morreu (stop)
+                    if out.as_mut().is_some_and(|o| o.write(&audio).is_err()) {
+                        out = None; // cortado (stop)
                     }
                 }
             }
@@ -489,16 +537,20 @@ impl Speech {
             return;
         }
         self.speaking.store(true, Ordering::SeqCst);
-        match self.open_player(clip.rate) {
+        self.play_samples(clip.rate, &clip.samples, &clip.id);
+        self.speaking.store(false, Ordering::SeqCst);
+    }
+
+    fn play_samples(&self, rate: u32, samples: &[f32], id: &str) {
+        match self.open_player(rate) {
             Ok(mut out) => {
-                let _ = out.write_all(&f32_bytes(&clip.samples));
+                let _ = out.write(samples);
                 drop(out);
                 self.wait_player();
-                *lock(&self.last) = Some(clip.id.clone());
+                *lock(&self.last) = Some(id.to_owned());
             }
             Err(e) => eprintln!("[speech] {e:#}"),
         }
-        self.speaking.store(false, Ordering::SeqCst);
     }
 
     /// Toca o WAV de uma fala do histórico, na vez dele.
@@ -508,30 +560,20 @@ impl Speech {
             return;
         }
         self.speaking.store(true, Ordering::SeqCst);
-        match Command::new("pw-play")
-            .args(["--media-role", "Communication"])
-            .arg(path)
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
-        {
-            Ok(child) => {
-                *lock(&self.player) = Some(child);
-                self.wait_player();
-                *lock(&self.last) = Some(id.to_owned());
-            }
-            Err(e) => eprintln!("[speech] não deu para abrir o pw-play: {e}"),
+        match spoken::read_wav(path) {
+            Ok((rate, samples)) => self.play_samples(rate, &samples, id),
+            Err(e) => eprintln!("[speech] {}: {e:#}", path.display()),
         }
         self.speaking.store(false, Ordering::SeqCst);
     }
 
-    /// Espera o `pw-play` tocar o que falta, sem segurar o lock: um `stop` no
-    /// meio ainda o mata.
+    /// Espera tocar o que falta, sem segurar o lock: um `stop` no meio ainda
+    /// corta.
     fn wait_player(&self) {
         loop {
             let mut p = lock(&self.player);
-            match p.as_mut().map(Child::try_wait) {
-                Some(Ok(None)) => {}
+            match p.as_mut().map(Player::finished) {
+                Some(false) => {}
                 _ => {
                     *p = None;
                     return;
@@ -542,19 +584,11 @@ impl Speech {
         }
     }
 
-    /// Um `pw-play` cru, mono, f32, na taxa do modelo. Volta a entrada dele.
-    fn open_player(&self, rate: u32) -> Result<ChildStdin> {
-        let mut child = Command::new("pw-play")
-            .args(["--raw", "--format", "f32", "--channels", "1", "--rate", &rate.to_string()])
-            .args(["--latency", "50ms", "--media-role", "Communication", "-"])
-            .stdin(Stdio::piped())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
-            .context("não deu para abrir o pw-play (vem com o PipeWire)")?;
-        let stdin = child.stdin.take().ok_or_else(|| anyhow!("pw-play sem entrada"))?;
-        *lock(&self.player) = Some(child);
-        Ok(stdin)
+    /// O alto-falante, mono, na taxa do modelo. Volta a entrada dele.
+    fn open_player(&self, rate: u32) -> Result<player::Sink> {
+        let (p, sink) = player::open(rate)?;
+        *lock(&self.player) = Some(p);
+        Ok(sink)
     }
 
     /// Manda o trabalhador embora depois de ocioso: é aqui que a VRAM volta.
@@ -584,10 +618,6 @@ struct Made {
     prose: String,
     language: &'static str,
     voice: String,
-}
-
-fn f32_bytes(samples: &[f32]) -> Vec<u8> {
-    samples.iter().flat_map(|s| s.to_le_bytes()).collect()
 }
 
 /// O log não guarda o que foi dito, só uma marca para casar com o histórico.

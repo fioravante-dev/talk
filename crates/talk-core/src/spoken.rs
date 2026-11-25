@@ -112,6 +112,21 @@ pub fn write_wav(path: &Path, rate: u32, samples: &[f32]) -> Result<()> {
     Ok(())
 }
 
+/// Lê de volta um WAV do `write_wav` (PCM de 16 bits, mono): (taxa, amostras).
+pub fn read_wav(path: &Path) -> Result<(u32, Vec<f32>)> {
+    let b = std::fs::read(path)?;
+    if b.len() < 44 || &b[..4] != b"RIFF" || &b[8..16] != b"WAVEfmt " {
+        anyhow::bail!("não é um WAV do talk");
+    }
+    let rate = u32::from_le_bytes([b[24], b[25], b[26], b[27]]);
+    let (channels, bits) = (u16::from_le_bytes([b[22], b[23]]), u16::from_le_bytes([b[34], b[35]]));
+    if channels != 1 || bits != 16 || &b[36..40] != b"data" {
+        anyhow::bail!("WAV fora do formato do talk ({channels} canais, {bits} bits)");
+    }
+    let samples = b[44..].as_chunks::<2>().0.iter().map(|c| f32::from(i16::from_le_bytes(*c)) / 32767.0).collect();
+    Ok((rate, samples))
+}
+
 /// Apaga os áudios mais velhos que `keep` e, dos que sobram, os mais antigos
 /// até a pasta caber em `max_bytes`. `None` em `keep` = nunca por idade.
 /// Volta quantos apagou.
@@ -188,6 +203,19 @@ mod tests {
         assert_eq!(u32::from_le_bytes([b[24], b[25], b[26], b[27]]), 24_000);
         assert_eq!(b.len(), 44 + 6);
         assert_eq!(i16::from_le_bytes([b[46], b[47]]), 32767);
+    }
+
+    #[test]
+    fn reads_back_what_it_wrote() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("x.wav");
+        write_wav(&p, 24_000, &[0.0, 0.5, -1.0]).unwrap();
+        let (rate, s) = read_wav(&p).unwrap();
+        assert_eq!(rate, 24_000);
+        assert_eq!(s.len(), 3);
+        assert!((s[1] - 0.5).abs() < 1e-3 && (s[2] + 1.0).abs() < 1e-3);
+        std::fs::write(&p, b"nada").unwrap();
+        assert!(read_wav(&p).is_err());
     }
 
     #[test]

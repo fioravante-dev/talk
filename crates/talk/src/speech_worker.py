@@ -17,7 +17,13 @@ import sys
 
 # O stdout é o fio com o serviço: nada além do protocolo pode sair por ele. As
 # bibliotecas imprimem avisos à vontade; o fd 1 passa a ser o stderr (o log).
-wire = os.fdopen(os.dup(1), "wb")
+_wire_fd = os.dup(1)
+if sys.platform == "win32":
+    # No Windows o fd pode estar em modo texto: cada \n viraria \r\n no áudio.
+    import msvcrt
+
+    msvcrt.setmode(_wire_fd, os.O_BINARY)
+wire = os.fdopen(_wire_fd, "wb")
 os.dup2(2, 1)
 sys.stdout = sys.stderr
 

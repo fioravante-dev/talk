@@ -10,6 +10,11 @@
 //!     GET  /vocab                     {"vocab":"…","vocab_txt":"…"}: o app guarda para ditar sem o PC
 //!     POST /warm                      sobe o trabalhador já (o app chama ao começar a gravar)
 //!     POST /transcribe?language=pt    corpo: WAV → {"text","language","stt_seconds","audio_seconds"}
+//!     GET  /speech/presence           {"speech": bool, "present_secs": n|null}: há quanto
+//!                                     tempo a pessoa usou este PC com o T3 na frente
+//!     POST /speech/speak              corpo: {"text", "thread"?} → fala aqui (o `talk-relay`)
+//!     POST /speech/hush               cala
+//!     POST /speech/again              fala de novo a última
 
 use std::io::Read;
 use std::sync::Arc;
@@ -78,6 +83,18 @@ fn handle(service: &Service, mut req: Request) {
             (Method::Post, "/transcribe") => {
                 transcribe(service, &cfg, &mut req, param(&query, "language").as_deref()).map_err(|e| (400, format!("{e:#}")))
             }
+            (Method::Get, "/speech/presence") => Ok(json!({
+                "host": hostname(),
+                // Ligada e instalada: só assim vale mandar a fala para cá.
+                "speech": cfg.speech_enabled && crate::speech::installed(&cfg),
+                "present_secs": service.speech.presence().map(|d| d.as_secs()),
+            })),
+            (Method::Post, "/speech/speak") => speak(service, &mut req).map_err(|e| (400, format!("{e:#}"))),
+            (Method::Post, "/speech/hush") => {
+                service.speech.hush();
+                Ok(json!({"ok": true}))
+            }
+            (Method::Post, "/speech/again") => Ok(json!({"ok": service.speech.replay()})),
             _ => Err((404, format!("{path}: não existe"))),
         }
     };
@@ -93,6 +110,23 @@ fn handle(service: &Service, mut req: Request) {
         resp = resp.with_header(h);
     }
     let _ = req.respond(resp);
+}
+
+fn speak(service: &Service, req: &mut Request) -> Result<serde_json::Value> {
+    #[derive(serde::Deserialize)]
+    struct Body {
+        text: String,
+        #[serde(default)]
+        thread: Option<String>,
+    }
+    let mut raw = String::new();
+    req.as_reader().take(1024 * 1024).read_to_string(&mut raw)?;
+    let body: Body = serde_json::from_str(&raw).context("esperava {\"text\": ...}")?;
+    if body.text.trim().is_empty() {
+        bail!("nada para falar");
+    }
+    service.speak(body.text, body.thread);
+    Ok(json!({"ok": true}))
 }
 
 fn transcribe(service: &Service, cfg: &Config, req: &mut Request, language: Option<&str>) -> Result<serde_json::Value> {

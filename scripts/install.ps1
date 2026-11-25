@@ -10,7 +10,8 @@
 # RTX com o driver instalado.
 #
 # Variáveis: $env:TALK_DIR (onde fica o código, padrão ~\src\talk) e
-# $env:CUDA_ARCH (padrão: a da placa, pelo nvidia-smi). $env:TALK_UPDATE=1 é o
+# $env:CUDA_ARCH (padrão: a da placa, pelo nvidia-smi). $env:TALK_SPEECH=1
+# instala também a fala (`talk-rs speak`, ~3 GB a mais). $env:TALK_UPDATE=1 é o
 # modo da atualização pela bandeja (`talk-rs update`): roda escondido, então
 # falha em vez de abrir o winget se faltar alguma ferramenta.
 
@@ -66,6 +67,11 @@ $ErrorActionPreference = "Continue"
 if ($LASTEXITCODE -ne 0) { throw "o build falhou" }
 $ErrorActionPreference = "Stop"
 & "$src\scripts\install-windows.ps1"
+# A fala (opcional): só com $env:TALK_SPEECH=1, ou se já está instalada (aí a
+# atualização a mantém em dia). $env:TALK_SPEECH=0 pula sempre.
+$wantSpeech = $env:TALK_SPEECH
+if (-not $wantSpeech -and (Test-Path "$env:LOCALAPPDATA\talk\speech\venv\Scripts\python.exe")) { $wantSpeech = "1" }
+if ($wantSpeech -eq "1") { & "$src\scripts\install-speech.ps1" }
 # De onde o `talk-rs update` puxa e recompila.
 $record = "# Escrito pelo scripts\install.ps1: de onde o talk-rs update puxa e recompila.`nsrc = '$src'`ncuda_arch = '$env:CUDA_ARCH'`n"
 [IO.File]::WriteAllText("$env:LOCALAPPDATA\talk\install.toml", $record)

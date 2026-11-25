@@ -106,8 +106,7 @@ pub struct Service {
     tray: Mutex<Option<Handle<Tray>>>,
     /// As janelas abertas, ouvindo os eventos. Quem fechou sai na próxima escrita.
     subscribers: Mutex<Vec<UnixStream>>,
-    #[cfg(unix)]
-    speech: crate::speech::Speech,
+    pub speech: crate::speech::Speech,
 }
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -247,7 +246,6 @@ impl Service {
 
     /// Liga ou desliga a fala: grava no config, acerta a bandeja e, desligando,
     /// cala o que estiver tocando ou esperando.
-    #[cfg(unix)]
     fn set_speech(&self, on: bool) -> Result<()> {
         talk_core::config::save_key(&paths::config_file(), "speech_enabled", on)?;
         if !on {
@@ -259,13 +257,25 @@ impl Service {
         Ok(())
     }
 
+    /// Põe uma fala na fila (daqui, ou de outro aparelho pelo `remote.rs`).
+    /// Desligada, a fala nem é gerada; quem pediu não precisa saber.
+    pub fn speak(&self, text: String, thread: Option<String>) {
+        let cfg = Config::load(&paths::config_file()).unwrap_or_default();
+        if !cfg.speech_enabled {
+            return;
+        }
+        match thread.filter(|t| !t.trim().is_empty()) {
+            Some(thread) => self.speech.enqueue_for_thread(thread, text, &cfg.speech_when),
+            None => self.speech.enqueue(text),
+        }
+    }
+
     pub fn toggle(self: &Arc<Self>, language: Option<String>) -> Result<&'static str> {
         let mut phase = lock(&self.phase);
         match std::mem::replace(&mut *phase, Phase::Transcribing) {
             Phase::Idle => {
                 // Começar a falar cala o talk: dá para interromper o Claude no
                 // meio. E enquanto grava nada toca (o microfone pegaria).
-                #[cfg(unix)]
                 self.speech.set_dictating(true);
                 let cfg = Config::load(&paths::config_file()).unwrap_or_default();
                 let target = (!cfg.input_device.is_empty()).then_some(cfg.input_device.as_str());
@@ -273,7 +283,6 @@ impl Service {
                     Ok(c) => c,
                     Err(e) => {
                         *phase = Phase::Idle;
-                        #[cfg(unix)]
                         self.speech.set_dictating(false);
                         return Err(e);
                     }
@@ -311,7 +320,6 @@ impl Service {
                         notify("⚠ talk", &format!("{e:#}"));
                     }
                     *lock(&me.phase) = Phase::Idle;
-                    #[cfg(unix)]
                     me.speech.set_dictating(false);
                     me.set_look(Look::Idle, "pronto");
                 });
@@ -482,30 +490,18 @@ impl Service {
                 model_loaded: Some(lock(&self.worker).as_mut().is_some_and(Worker::alive)),
                 #[cfg(windows)]
                 rss_mb: memory_stats::memory_stats().map(|m| m.physical_mem as f64 / 1_048_576.0),
-                #[cfg(unix)]
                 speaking: Some(self.speech.speaking()),
-                #[cfg(unix)]
                 speech_loaded: Some(self.speech.loaded()),
-                #[cfg(unix)]
                 speech_waiting: Some(self.speech.waiting()),
                 ..Reply::default()
             },
-            #[cfg(unix)]
             "speak" => match req.text.filter(|t| !t.trim().is_empty()) {
                 Some(text) => {
-                    let cfg = Config::load(&paths::config_file()).unwrap_or_default();
-                    // Desligada, a fala nem é gerada; quem pediu não precisa saber.
-                    if cfg.speech_enabled {
-                        match req.thread.filter(|t| !t.trim().is_empty()) {
-                            Some(thread) => self.speech.enqueue_for_thread(thread, text, &cfg.speech_when),
-                            None => self.speech.enqueue(text),
-                        }
-                    }
+                    self.speak(text, req.thread);
                     Reply { ok: true, phase: lock(&self.phase).name().into(), ..Reply::default() }
                 }
                 None => Reply { ok: false, error: Some("nada para falar".into()), ..Reply::default() },
             },
-            #[cfg(unix)]
             "again" => Reply {
                 ok: match req.text.as_deref().filter(|id| !id.is_empty()) {
                     Some(id) => self.speech.play_entry(id),
@@ -515,7 +511,6 @@ impl Service {
                 ..Reply::default()
             },
             // `talk-rs speech on|off`, a bandeja e a janela.
-            #[cfg(unix)]
             "speech" => match req.text.as_deref() {
                 Some(v @ ("on" | "off")) => match self.set_speech(v == "on") {
                     Ok(()) => Reply { ok: true, phase: lock(&self.phase).name().into(), ..Reply::default() },
@@ -523,7 +518,6 @@ impl Service {
                 },
                 _ => Reply { ok: false, error: Some("use on ou off".into()), ..Reply::default() },
             },
-            #[cfg(unix)]
             "hush" => {
                 self.speech.hush();
                 Reply { ok: true, phase: lock(&self.phase).name().into(), ..Reply::default() }
@@ -571,7 +565,6 @@ impl Service {
 }
 
 /// As 5 últimas falas para o menu da bandeja: (id, rótulo).
-#[cfg(unix)]
 fn recent_spoken() -> Vec<(String, String)> {
     talk_core::spoken::read(&talk_core::spoken::file(), 5)
         .iter()
@@ -662,7 +655,6 @@ pub fn serve() -> Result<()> {
         last: Mutex::new(String::new()),
         tray: Mutex::new(None),
         subscribers: Mutex::new(vec![]),
-        #[cfg(unix)]
         speech: crate::speech::Speech::start(),
     });
 
@@ -676,9 +668,7 @@ pub fn serve() -> Result<()> {
                 look: Look::Idle,
                 tooltip: "pronto".into(),
                 update: UpdateState::load().available().map(str::to_owned),
-                #[cfg(unix)]
                 recent: recent_spoken(),
-                #[cfg(unix)]
                 speech_on: Config::load(&paths::config_file()).map_or(true, |c| c.speech_enabled),
                 actions: tx.clone(),
             }).spawn() {
@@ -708,27 +698,29 @@ pub fn serve() -> Result<()> {
                     }
                 }
                 // Falando, o clique cala; calado, fala de novo.
-                #[cfg(unix)]
+                // Falando, o clique cala. Calado, no Linux fala de novo; no
+                // Windows o clique esquerdo sempre foi o ditado.
                 Action::Click => {
                     if me.speech.speaking() {
                         me.speech.stop();
+                    } else if cfg!(windows) {
+                        if let Err(e) = me.toggle(None) {
+                            notify("⚠ talk", &format!("{e:#}"));
+                        }
                     } else if !me.speech.replay() {
                         notify("talk", "Ainda não há fala para repetir.");
                     }
                 }
-                #[cfg(unix)]
                 Action::SpeechOn(on) => {
                     if let Err(e) = me.set_speech(on) {
                         notify("⚠ talk", &format!("{e:#}"));
                     }
                 }
-                #[cfg(unix)]
                 Action::Again => {
                     if !me.speech.replay() {
                         notify("talk", "Ainda não há fala para repetir.");
                     }
                 }
-                #[cfg(unix)]
                 Action::Play(id) => {
                     me.speech.play_entry(&id);
                 }
@@ -753,7 +745,6 @@ pub fn serve() -> Result<()> {
         }
     });
     // Cada fala nova entra no menu "Últimas falas".
-    #[cfg(unix)]
     {
         let me = service.clone();
         service.speech.on_spoken(move || {

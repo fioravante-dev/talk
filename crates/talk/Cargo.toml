@@ -22,6 +22,7 @@ path = "src/start.rs"
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }
+rusqlite = { version = "0.43", features = ["bundled"] }
 serde_json = "1"
 talk-core = { path = "../talk-core" }
 tiny_http = "0.12"
@@ -29,8 +30,8 @@ whisper-rs = { version = "0.16", features = ["cuda"] }
 
 [target.'cfg(unix)'.dependencies]
 cosmic-protocols = { version = "0.2", default-features = false, features = ["client"] }
-rusqlite = { version = "0.43", features = ["bundled"] }
 wayland-client = "0.31"
+wayland-protocols = { version = "0.32", features = ["client", "staging"] }
 evdev = "0.13"
 nix = { version = "0.30", features = ["signal"] }
 ksni = { version = "0.3", features = ["blocking"] }
@@ -47,3 +48,10 @@ tray-icon = "0.26"
 uds_windows = "1"
 windows-hotkeys = "0.2"
 winreg = "0.56"
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_System_SystemInformation",
+    "Win32_System_Threading",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_UI_WindowsAndMessaging",
+] }

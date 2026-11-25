@@ -10,7 +10,7 @@ use rusqlite::{Connection, OpenFlags};
 fn database() -> Option<PathBuf> {
     let home = match std::env::var_os("T3CODE_HOME") {
         Some(h) => PathBuf::from(h),
-        None => PathBuf::from(std::env::var_os("HOME")?).join(".t3"),
+        None => PathBuf::from(std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" })?).join(".t3"),
     };
     Some(home.join("userdata/statev2.sqlite"))
 }

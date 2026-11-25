@@ -90,14 +90,25 @@ Não edite o arquivo de atalhos do COSMIC na mão enquanto a janela está aberta
 
 ## Fala (`talk-rs speak`)
 
-Só no Linux. Opcional: `TALK_SPEECH=1 ./scripts/install.sh` cria o ambiente
-Python em `~/.cache/talk/speech/venv` (`faster-qwen3-tts` e `transformers`
-com versões fixas: o 5.24 quebra o modelo) e baixa o Qwen3-TTS 0.6B.
+Linux e Windows. Opcional: `TALK_SPEECH=1 ./scripts/install.sh` (no Windows,
+`scripts\install-speech.ps1`, chamado pelo `install.ps1` com `TALK_SPEECH=1`)
+cria o ambiente Python em `<cache>/speech/venv` (`faster-qwen3-tts` e
+`transformers` com versões fixas: o 5.24 quebra o modelo; no Windows o PyTorch
+vem com `--torch-backend auto`, porque o do PyPI é só CPU) e baixa o
+Qwen3-TTS 0.6B.
 
 - O serviço põe a fala numa fila e volta na hora; um trabalhador em Python
   (`crates/talk/src/speech_worker.py`, embutido no binário e escrito em
-  `~/.cache/talk/speech/` ao subir) sintetiza frase por frase e o `pw-play`
-  toca. Ele sai depois de `speech_keep_alive` (30 min) e devolve a VRAM.
+  `<cache>/speech/` ao subir) sintetiza frase por frase e o alto-falante
+  toca (`player.rs`: `pw-play`; `player_win.rs`: WASAPI pelo `cpal`, com a
+  conversão de 24 kHz para a taxa do mixer no callback). Ele sai depois de `speech_keep_alive` (30 min) e devolve a VRAM.
+- Presença: o vigia do foco também sabe se o PC está largado (30 s sem
+  teclado nem mouse: `ext_idle_notify_v1` v2 no Linux, `GetLastInputInfo` no
+  Windows). `GET /speech/presence` no servidor do `listen` diz há quantos
+  segundos a pessoa usou o PC com o T3 na frente; o `scripts/talk-relay`
+  manda o `POST /speech/speak` só para o mais recente (até 10 min).
+- Foco no Windows: `focus_win.rs` olha a janela da frente a cada 300 ms e
+  reconhece o T3 pelo executável (`T3 Code.exe`).
 - Foco (`speech_when = "focus"`): o `talk-rs speak` lê `T3CODE_THREAD_ID`, acha
   o título da conversa no banco do T3 (`~/.t3/userdata/statev2.sqlite`, só
   leitura) e a fala espera a janela do T3 em foco mostrar aquela conversa

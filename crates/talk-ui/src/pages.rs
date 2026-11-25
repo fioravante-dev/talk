@@ -303,7 +303,7 @@ fn ajustes_with(shortcut_error: Option<(String, String)>, update_message: Option
         shortcuts: shortcut_rows(),
         languages: LANGUAGES.to_vec(),
         paste_key: cfg.paste_key.to_lowercase(),
-        speech_on: cfg!(unix).then_some(cfg.speech_enabled),
+        speech_on: Some(cfg.speech_enabled),
         models,
         keep_options: KEEP.to_vec(),
         keep_alive: KEEP[idx].0.to_owned(),
