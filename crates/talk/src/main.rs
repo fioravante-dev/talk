@@ -66,6 +66,10 @@ enum Cmd {
     /// Fala o texto (ou o stdin) e volta na hora; as falas fazem fila.
     #[cfg(unix)]
     Speak {
+        /// O título da conversa do T3 de onde vem a fala. Sem isto, o do
+        /// `T3CODE_THREAD_ID` (quem repassa de outra máquina manda o de lá).
+        #[arg(long)]
+        thread: Option<String>,
         /// Sem isto, lê do stdin.
         text: Vec<String>,
     },
@@ -126,7 +130,7 @@ fn main() -> Result<()> {
             Ok(())
         }
         #[cfg(unix)]
-        Cmd::Speak { text } => {
+        Cmd::Speak { thread, text } => {
             let text = if text.is_empty() {
                 std::io::read_to_string(std::io::stdin())?
             } else {
@@ -135,7 +139,7 @@ fn main() -> Result<()> {
             let reply = service::request(&service::Request {
                 text: Some(text),
                 // Chamado de dentro de uma conversa do T3: a fala espera a janela dela.
-                thread: t3::current_thread_title(),
+                thread: thread.filter(|t| !t.trim().is_empty()).or_else(t3::current_thread_title),
                 ..service::Request::new("speak")
             })?;
             if let Some(e) = reply.error {
