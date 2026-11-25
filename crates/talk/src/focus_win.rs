@@ -4,8 +4,11 @@
 //! consulta é barata.
 //!
 //! O título da janela do T3 é "Projeto / Conversa", como no Linux. O T3 é
-//! reconhecido pelo executável (`T3 Code.exe`), não pelo título.
+//! reconhecido pelo executável (`T3 Code (Beta).exe`, ou sem o sufixo), não
+//! pelo título.
 //! "Largado" = 30 s sem teclado nem mouse (`GetLastInputInfo`).
+
+#![allow(unsafe_code)]
 
 use std::path::Path;
 use std::thread;
@@ -32,7 +35,7 @@ pub type OnChange = Box<dyn Fn(Seen) + Send>;
 /// O nome do executável do T3 Code, sem diferenciar maiúsculas.
 fn is_t3(exe: &str) -> bool {
     let name = Path::new(exe).file_stem().and_then(|n| n.to_str()).unwrap_or("").to_lowercase();
-    name == "t3 code" || name == "t3code" || name == "t3-code"
+    ["t3 code", "t3code", "t3-code"].iter().any(|p| name.starts_with(p))
 }
 
 fn exe_of(hwnd: HWND) -> Option<String> {
@@ -112,6 +115,7 @@ mod tests {
     #[test]
     fn knows_the_t3_executable() {
         assert!(is_t3(r"C:\Users\p\AppData\Local\Programs\T3 Code\T3 Code.exe"));
+        assert!(is_t3(r"C:\Users\p\AppData\Local\Programs\t3code\T3 Code (Beta).exe"));
         assert!(!is_t3(r"C:\Windows\explorer.exe"));
     }
 }

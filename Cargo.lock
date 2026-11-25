@@ -3359,8 +3359,10 @@ dependencies = [
  "tray-icon",
  "uds_windows",
  "wayland-client",
+ "wayland-protocols",
  "whisper-rs",
  "windows-hotkeys",
+ "windows-sys 0.61.2",
  "winreg",
 ]
 

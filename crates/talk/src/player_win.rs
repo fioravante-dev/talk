@@ -119,7 +119,7 @@ fn output<T: SizedSample + FromSample<f32>>(
 ) -> Result<cpal::Stream> {
     device
         .build_output_stream(
-            config,
+            *config,
             move |data: &mut [T], _: &_| {
                 let mut q = lock(&queue);
                 for frame in data.chunks_mut(channels) {
