@@ -30,6 +30,7 @@ class SettingsActivity : Activity() {
     private lateinit var prefs: Prefs
     private lateinit var root: LinearLayout
     private lateinit var setup: TextView
+    private lateinit var comeback: TextView
     private lateinit var serverGroup: RadioGroup
     private lateinit var token: EditText
     private lateinit var pcStatus: TextView
@@ -88,6 +89,10 @@ class SettingsActivity : Activity() {
         button("Permitir o microfone") { requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), 1) }
         button("Ativar o teclado de voz") { startActivity(Intent(Settings.ACTION_INPUT_METHOD_SETTINGS)) }
         text("Para ditar: toque num campo, troque para \"talk (voz)\" pelo botão de teclado na barra de navegação e fale. Ele volta sozinho para o teu teclado.", 13f)
+        comeback = text("")
+        button("Voltar sempre ao talk") { startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }
+        text("Com isto ligado (Acessibilidade → talk), quando você troca para o teu teclado pelo talk, o talk volta a ser o teclado assim que o outro fechar: o próximo campo abre na voz. " +
+            "Se o Android disser que a opção está restrita: Ajustes → Apps → talk → ⋮ → Permitir configurações restritas.", 13f)
 
         title("2. Os PCs")
         text("Precisa do Tailscale ligado aqui. No automático, a cada ditada vale o primeiro PC que responder. Toque e segure um PC para tirá-lo da lista.", 13f)
@@ -126,21 +131,6 @@ class SettingsActivity : Activity() {
             ),
             prefs.mode,
         ) { prefs.mode = it }
-        text("Botão de falar", 14f)
-        choice(
-            listOf(
-                "right" to "No canto direito, onde o Gboard põe o microfone",
-                "left" to "No canto esquerdo",
-                "center" to "No meio",
-                "both" to "Nos dois cantos",
-            ),
-            prefs.micPos,
-        ) { prefs.micPos = it }
-        root.addView(CheckBox(this).apply {
-            text = "O botão cresce com a voz"
-            isChecked = prefs.micPulse
-            setOnCheckedChangeListener { _, on -> prefs.micPulse = on }
-        })
         root.addView(CheckBox(this).apply {
             text = "Começar a gravar ao abrir"
             isChecked = prefs.autostart
@@ -192,6 +182,11 @@ class SettingsActivity : Activity() {
         val enabled = getSystemService(InputMethodManager::class.java).enabledInputMethodList.any { it.packageName == packageName }
         setup.text = "Microfone: ${if (mic) "✓ permitido" else "✗ falta permitir"}\n" +
             "Teclado de voz: ${if (enabled) "✓ ativado" else "✗ falta ativar"}"
+        comeback.text = when {
+            android.os.Build.VERSION.SDK_INT < 30 -> "Voltar ao talk: precisa do Android 11 ou mais novo"
+            Comeback.enabled(this) -> "Voltar ao talk: ✓ ligado"
+            else -> "Voltar ao talk: desligado"
+        }
     }
 
     // --- PCs ------------------------------------------------------------

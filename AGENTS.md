@@ -142,6 +142,12 @@ large-v3-turbo, baixados pelo app) e digita no campo.
 - Compilar: `cd android && ./gradlew assembleRelease`, com `JAVA_HOME` num JDK
   17 e `ANDROID_HOME` no SDK com o NDK. O Gradle chama `android/rust/build.sh`,
   que compila o motor (Rust + whisper.cpp) com `cargo ndk`.
+- A volta ao teclado de voz é um serviço de acessibilidade
+  (`Comeback.kt`): depois de trocar pelo botão do talk, quando o outro teclado
+  fecha ele chama `SoftKeyboardController.switchToInputMethod` (Android 11+).
+  Instalado por fora da loja, o Android exige "Permitir configurações
+  restritas" nas informações do app (na Samsung, com o Bloqueio automático
+  desligado).
 - O `android/rust` fica fora do workspace: o `cargo test` do PC não compila o
   whisper.cpp para Android. A transcrição é a mesma do PC:
   `crates/talk/src/stt.rs`, incluído por `#[path]`.

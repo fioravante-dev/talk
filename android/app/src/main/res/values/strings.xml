@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="comeback_label">talk: voltar ao teclado de voz</string>
+    <string name="comeback_description">Quando você troca do talk para o teu teclado, o talk volta a ser o teclado assim que o outro fechar. Ele só percebe se há um teclado na tela; não lê o que você digita.</string>
+</resources>

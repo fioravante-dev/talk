@@ -3,16 +3,11 @@ package dev.fioravante.talk
 import android.content.Context
 import android.content.res.ColorStateList
 import android.content.res.Configuration
-import android.graphics.Canvas
 import android.graphics.Color
-import android.graphics.Paint
-import android.graphics.RectF
 import android.graphics.drawable.Drawable
 import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.RippleDrawable
 import android.os.Build
-import android.view.View
-import kotlin.math.log10
 
 /**
  * As cores do teclado: as do sistema (Material You, tiradas do papel de parede,
@@ -35,7 +30,6 @@ class Palette(private val ctx: Context) {
     val green = if (dark) 0xFF5DB36A.toInt() else 0xFF3F8F4A.toInt()
     val red = if (dark) 0xFFE5533D.toInt() else 0xFFD8442E.toInt()
     val amber = if (dark) 0xFFE0A030.toInt() else 0xFFC98A1B.toInt()
-    val meterOff = if (dark) 0x33FFFFFF else 0x1F000000
 
     /** Um fundo com o toque do Material (a onda), na forma pedida. */
     fun surface(color: Int, radius: Float, oval: Boolean = false): Drawable {
@@ -47,47 +41,4 @@ class Palette(private val ctx: Context) {
         return RippleDrawable(ColorStateList.valueOf(ripple), content, shape(Color.BLACK))
     }
 
-}
-
-/**
- * O medidor do microfone, o mesmo da pílula do PC: 16 segmentos, verdes, com os
- * dois últimos vermelhos. Sobe na hora e desce devagar, para a fala ser lida.
- */
-class Meter(ctx: Context, private val look: Palette) : View(ctx) {
-    private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
-    private val rect = RectF()
-    private var lit = 0f
-
-    /** RMS de 0 a 1: -50 dB apaga tudo, -8 dB acende tudo. */
-    fun level(rms: Float) {
-        val db = 20f * log10(rms.coerceAtLeast(1e-5f))
-        val target = ((db + 50f) / 42f * SEGMENTS).coerceIn(0f, SEGMENTS.toFloat())
-        lit = if (target > lit) target else lit - (lit - target) * 0.35f
-        invalidate()
-    }
-
-    fun reset() {
-        lit = 0f
-        invalidate()
-    }
-
-    override fun onDraw(canvas: Canvas) {
-        val gap = width * 0.025f
-        val w = (width - gap * (SEGMENTS - 1)) / SEGMENTS
-        val r = height / 4f
-        for (i in 0 until SEGMENTS) {
-            paint.color = when {
-                i >= lit.toInt() -> look.meterOff
-                i >= SEGMENTS - 2 -> look.red
-                else -> look.green
-            }
-            val x = i * (w + gap)
-            rect.set(x, 0f, x + w, height.toFloat())
-            canvas.drawRoundRect(rect, r, r, paint)
-        }
-    }
-
-    private companion object {
-        const val SEGMENTS = 16
-    }
 }

@@ -20,7 +20,6 @@ import android.view.inputmethod.InputMethodManager
 import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
-import android.widget.ProgressBar
 import android.widget.TextView
 import kotlin.concurrent.thread
 
@@ -34,13 +33,13 @@ class TalkIme : InputMethodService() {
     private val ui = Handler(Looper.getMainLooper())
     private lateinit var prefs: Prefs
     private lateinit var look: Palette
-    private val mics = mutableListOf<Mic>()
     private lateinit var tools: View
     private lateinit var cancelButton: View
+    private lateinit var pad: View
+    private lateinit var orb: Orb
     private lateinit var title: TextView
+    private lateinit var wave: Wave
     private lateinit var caption: TextView
-    private lateinit var meter: Meter
-    private var builtPos = ""
     private var builtDark = false
     private var state = State.IDLE
     private var recorder: Recorder? = null
@@ -81,23 +80,6 @@ class TalkIme : InputMethodService() {
 
     private fun centered() = FrameLayout.LayoutParams(-2, -2, Gravity.CENTER)
 
-    /** O botão de falar: um círculo de 48 dp onde fica o microfone do Gboard. */
-    private fun newMic() = FrameLayout(this).apply {
-        val glyph = ImageView(this@TalkIme)
-        val spin = ProgressBar(this@TalkIme).apply {
-            isIndeterminate = true
-            indeterminateTintList = ColorStateList.valueOf(look.amber)
-            visibility = View.GONE
-        }
-        addView(glyph, centered())
-        addView(spin, FrameLayout.LayoutParams(dp(40), dp(40), Gravity.CENTER))
-        contentDescription = "Falar"
-        setOnClickListener { onMic() }
-        mics += Mic(this, glyph, spin)
-    }
-
-    private class Mic(val view: FrameLayout, val glyph: ImageView, val spin: ProgressBar)
-
     /** ⌫ segurado apaga em sequência, como num teclado comum. */
     private fun repeating(view: View, action: () -> Unit) {
         val again = object : Runnable {
@@ -125,51 +107,51 @@ class TalkIme : InputMethodService() {
 
     override fun onCreateInputView(): View {
         look = Palette(this)
-        builtPos = prefs.micPos
         builtDark = look.dark
-        mics.clear()
 
-        // A faixa de cima, na altura da do Gboard: ferramentas e o microfone.
+        // No canto de cima à esquerda, as ferramentas (ou o cancelar, gravando).
+        val notchW = dp(48 * 2 + 6)
+        val notchH = dp(48 + 6)
         tools = LinearLayout(this).apply {
             addView(tool(R.drawable.ic_settings, "Ajustes") { openSettings() }, LinearLayout.LayoutParams(dp(48), dp(48)))
             addView(tool(R.drawable.ic_keyboard, "Voltar ao meu teclado") { back() }, LinearLayout.LayoutParams(dp(48), dp(48)))
         }
         cancelButton = tool(R.drawable.ic_close, "Cancelar") { cancel() }
-        val bar = FrameLayout(this)
-        fun place(v: View, g: Int, w: Int = -2) = bar.addView(v, FrameLayout.LayoutParams(w, dp(48), g or Gravity.CENTER_VERTICAL))
-        val micSize = dp(48)
-        val (toolsAt, micsAt) = when (builtPos) {
-            "left" -> Gravity.END to listOf(Gravity.START)
-            "center" -> Gravity.START to listOf(Gravity.CENTER_HORIZONTAL)
-            "both" -> Gravity.CENTER_HORIZONTAL to listOf(Gravity.START, Gravity.END)
-            else -> Gravity.START to listOf(Gravity.END)
-        }
-        place(tools, toolsAt)
-        place(cancelButton, toolsAt, dp(48))
-        for (g in micsAt) place(newMic(), g, micSize)
 
-        // O meio: o que está acontecendo, grande o bastante para ler de relance.
+        // O resto é uma área só de falar: tocar em qualquer lugar dela começa, e
+        // de novo para e digita. O círculo no alto fica onde era o botão.
+        orb = Orb(this, look)
         title = TextView(this).apply {
             setTextColor(look.on)
             textSize = 17f
             gravity = Gravity.CENTER
         }
-        meter = Meter(this, look)
+        wave = Wave(this, look)
         caption = TextView(this).apply {
             setTextColor(look.onVariant)
             textSize = 13f
             gravity = Gravity.CENTER
             maxLines = 2
         }
-        val middle = LinearLayout(this).apply {
+        val column = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            gravity = Gravity.CENTER
-            addView(title)
-            addView(meter, LinearLayout.LayoutParams(dp(240), dp(12)).apply { setMargins(0, dp(12), 0, dp(10)) })
-            addView(caption)
-            // Gravando, o meio inteiro também para: um alvo grande para o polegar.
-            setOnClickListener { if (state == State.RECORDING) finish() }
+            gravity = Gravity.CENTER_HORIZONTAL
+            addView(orb, LinearLayout.LayoutParams(dp(120), dp(64)))
+            addView(title, LinearLayout.LayoutParams(-2, -2).apply { topMargin = dp(2) })
+            addView(wave, LinearLayout.LayoutParams(-1, dp(34)).apply { setMargins(dp(28), dp(4), dp(28), dp(4)) })
+            addView(caption, LinearLayout.LayoutParams(-2, -2).apply { topMargin = dp(4) })
         }
+        pad = View(this).apply {
+            contentDescription = "Falar"
+            setOnClickListener { onMic() }
+        }
+        val stage = FrameLayout(this).apply {
+            addView(pad, FrameLayout.LayoutParams(-1, -1))
+            addView(column, FrameLayout.LayoutParams(-1, -1).apply { topMargin = dp(6) })
+            addView(tools, FrameLayout.LayoutParams(-2, dp(48), Gravity.TOP or Gravity.START))
+            addView(cancelButton, FrameLayout.LayoutParams(dp(48), dp(48), Gravity.TOP or Gravity.START))
+        }
+        padShape = { color -> padSurface(look, color, dp(22).toFloat(), notchW.toFloat(), notchH.toFloat()) }
 
         // Embaixo: espaço, apagar e enter, como no teclado de sempre.
         val space = key(look.key, 8) { commit(" ") }.apply {
@@ -200,8 +182,7 @@ class TalkIme : InputMethodService() {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(look.bg)
             setPadding(dp(6), dp(6), dp(6), dp(10))
-            addView(bar, LinearLayout.LayoutParams(-1, dp(48)))
-            addView(middle, LinearLayout.LayoutParams(-1, dp(128)))
+            addView(stage, LinearLayout.LayoutParams(-1, dp(176)).apply { setMargins(dp(3), 0, dp(3), dp(8)) })
             addView(keys, LinearLayout.LayoutParams(-1, dp(52)))
             // No Android 15 o teclado vai até a borda: a barra de navegação (e o
             // botão de baixar o teclado) fica por cima do fim dele.
@@ -220,7 +201,8 @@ class TalkIme : InputMethodService() {
 
     override fun onStartInputView(info: EditorInfo?, restarting: Boolean) {
         super.onStartInputView(info, restarting)
-        if (prefs.micPos != builtPos || Palette(this).dark != builtDark) setInputView(onCreateInputView())
+        prefs.borrowed = false
+        if (Palette(this).dark != builtDark) setInputView(onCreateInputView())
         render()
         if (state == State.IDLE && prefs.autostart && !restarting) start()
     }
@@ -251,6 +233,7 @@ class TalkIme : InputMethodService() {
             return
         }
         val r = Recorder { level -> ui.post { if (state == State.RECORDING) pulse(level) } }
+        wave.reset()
         try {
             r.start()
         } catch (e: Exception) {
@@ -372,6 +355,8 @@ class TalkIme : InputMethodService() {
 
     private fun back() {
         if (state == State.RECORDING) cancel()
+        // O vigia (Comeback) traz o talk de volta quando o outro teclado fechar.
+        prefs.borrowed = true
         if (!switchToPreviousInputMethod()) {
             getSystemService(InputMethodManager::class.java).showInputMethodPicker()
         }
@@ -401,37 +386,40 @@ class TalkIme : InputMethodService() {
         }
     }
 
+    /** O fundo da área na cor pedida, na forma com o recorte. */
+    private var padShape: (Int) -> android.graphics.drawable.Drawable = { look.surface(it, 0f) }
+    private var padColor = 0
+
     private fun render() {
-        if (mics.isEmpty()) return
-        for (m in mics) {
-            val (bg, glyph, tint) = when (state) {
-                State.IDLE -> Triple(look.fn, R.drawable.ic_mic, look.on)
-                State.RECORDING -> Triple(look.red, R.drawable.ic_stop, Color.WHITE)
-                State.WORKING -> Triple(look.fn, R.drawable.ic_mic, look.onVariant)
-            }
-            m.view.background = look.surface(bg, 0f, oval = true)
-            m.glyph.setImageResource(glyph)
-            m.glyph.imageTintList = ColorStateList.valueOf(tint)
-            m.spin.visibility = if (state == State.WORKING) View.VISIBLE else View.GONE
-            m.view.contentDescription = if (state == State.RECORDING) "Parar e digitar" else "Falar"
-            if (state != State.RECORDING) {
-                m.view.scaleX = 1f
-                m.view.scaleY = 1f
-            }
+        if (!::pad.isInitialized) return
+        orb.mode = when (state) {
+            State.IDLE -> Orb.Mode.IDLE
+            State.RECORDING -> Orb.Mode.RECORDING
+            State.WORKING -> Orb.Mode.WORKING
+        }
+        // Gravando, a área toda ganha um fundo levemente avermelhado.
+        val color = if (state == State.RECORDING) blend(look.key, look.red, 0.14f) else look.key
+        if (color != padColor) {
+            padColor = color
+            pad.background = padShape(color)
+        }
+        pad.contentDescription = when (state) {
+            State.RECORDING -> "Parar e digitar"
+            State.WORKING -> "Transcrevendo"
+            State.IDLE -> "Falar"
         }
         val busy = state != State.IDLE
         tools.visibility = if (busy) View.GONE else View.VISIBLE
         cancelButton.visibility = if (busy) View.VISIBLE else View.GONE
-        meter.visibility = if (state == State.RECORDING) View.VISIBLE else View.INVISIBLE
-        if (state != State.RECORDING) meter.reset()
+        wave.visibility = if (state == State.RECORDING) View.VISIBLE else View.GONE
         when (state) {
             State.RECORDING -> {
                 val s = recorder?.seconds ?: 0
                 message = null
                 title.text = "%d:%02d".format(s / 60, s % 60)
-                title.textSize = 28f
+                title.textSize = 22f
                 title.fontFeatureSettings = "tnum"
-                caption.text = "ouvindo · " + where() + "\ntoque aqui ou no microfone para digitar"
+                caption.text = "ouvindo · " + where() + " · toque para digitar"
             }
             State.WORKING -> {
                 title.text = "Transcrevendo"
@@ -440,10 +428,10 @@ class TalkIme : InputMethodService() {
                 caption.text = where()
             }
             State.IDLE -> {
-                title.text = message ?: "Toque no microfone para falar"
+                title.text = message ?: "Toque para falar"
                 title.textSize = 17f
                 title.fontFeatureSettings = null
-                caption.text = if (message != null) "" else hint()
+                caption.text = if (message != null) "toque para falar de novo" else hint()
             }
         }
     }
@@ -456,12 +444,12 @@ class TalkIme : InputMethodService() {
     }
 
     private fun pulse(level: Float) {
-        meter.level(level)
-        if (!prefs.micPulse) return
-        val s = 1f + (level * 6f).coerceAtMost(0.18f)
-        for (m in mics) {
-            m.view.scaleX = s
-            m.view.scaleY = s
-        }
+        orb.level(level)
+        wave.level(level)
     }
+}
+
+private fun blend(a: Int, b: Int, t: Float): Int {
+    fun ch(shift: Int) = (((a shr shift) and 0xFF) * (1 - t) + ((b shr shift) and 0xFF) * t).toInt() shl shift
+    return (0xFF shl 24) or ch(16) or ch(8) or ch(0)
 }
