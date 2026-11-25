@@ -88,6 +88,28 @@ Não edite o arquivo de atalhos do COSMIC na mão enquanto a janela está aberta
 - O `unsafe` do projeto: `crates/talk-pill/src/main_win.rs` e os
   `#[unsafe(no_mangle)]` das funções JNI em `android/rust/src/lib.rs`.
 
+## Fala (`talk-rs speak`)
+
+Só no Linux. Opcional: `TALK_SPEECH=1 ./scripts/install.sh` cria o ambiente
+Python em `~/.cache/talk/speech/venv` (`faster-qwen3-tts` e `transformers`
+com versões fixas: o 5.24 quebra o modelo) e baixa o Qwen3-TTS 0.6B.
+
+- O serviço põe a fala numa fila e volta na hora; um trabalhador em Python
+  (`crates/talk/src/speech_worker.py`, embutido no binário e escrito em
+  `~/.cache/talk/speech/` ao subir) sintetiza frase por frase e o `pw-play`
+  toca. Ele sai depois de `speech_keep_alive` (30 min) e devolve a VRAM.
+- Foco (`speech_when = "focus"`): o `talk-rs speak` lê `T3CODE_THREAD_ID`, acha
+  o título da conversa no banco do T3 (`~/.t3/userdata/statev2.sqlite`, só
+  leitura) e a fala espera a janela do T3 em foco mostrar aquela conversa
+  (`crates/talk/src/focus.rs`, pelo `zcosmic_toplevel_info_v1`). Fora do T3 ou
+  fora do COSMIC, toca na hora.
+- Histórico: `~/.cache/talk/speech/spoken.jsonl` (texto, para sempre) e
+  `clips/<id>.wav` (áudio, `speech_audio_keep = "7d"`, até
+  `speech_audio_max_mb = 200`). Sem o áudio, `talk-rs again <id>` gera de novo.
+- O que dá para testar sem GPU está em `talk-core`: `speech` (markdown → prosa
+  → frases, idioma, o fio com o trabalhador) e `spoken` (histórico, WAV, limpeza).
+- Log do trabalhador: `~/.cache/talk/speech/speech.log`.
+
 ## Celular (Android)
 
 O app em `android/` é um teclado só de voz: grava, transcreve no PC pelo

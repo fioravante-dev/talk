@@ -64,6 +64,32 @@ talk-rs --version         # versão e commit
 talk-rs update            # atualiza (o talk também avisa sozinho)
 ```
 
+## Falar (o Claude lendo o resumo para você)
+
+No Linux, o talk também fala: o Claude chama `talk-rs speak "resumo"` no fim de
+cada resposta, e o resumo sai em voz alta, com uma voz natural (Qwen3-TTS na
+placa, ~2,7 GB de VRAM, o primeiro som em 0,2 s). Português com a voz vivian,
+inglês com a ryan.
+
+- Numa conversa do **T3 Code**, a fala espera você abrir aquela conversa: o
+  áudio é gerado na hora e toca quando a janela dela ganha foco (no COSMIC).
+- **Clique no ícone** da bandeja para ouvir de novo a última fala; as cinco
+  últimas ficam em "Últimas falas", e todas na aba **falas** da janela. O texto
+  fica para sempre; o áudio, por 7 dias.
+- Começar uma ditada cala a fala.
+
+```bash
+TALK_SPEECH=1 ./scripts/install.sh      # instala a fala (~3 GB a mais)
+talk-rs speak "Pronto, terminei."       # fala (o texto também pode vir do stdin)
+talk-rs hush                            # cala
+talk-rs again                           # de novo a última
+```
+
+Para o Claude usar, ponha no `~/.claude/CLAUDE.md` algo como: *"No fim de cada
+resposta, rode `talk-rs speak` com um resumo falado de 1 a 3 frases, sem
+código nem listas."* Numa máquina sem o talk (o celular, um servidor), o
+`scripts/talk-relay.sh` instalado como `talk-rs` repassa a fala ao PC pelo SSH.
+
 ## Desenvolver
 
 Rust, em `crates/`: `talk` (o serviço), `talk-ui` (a janela), `talk-pill` (a

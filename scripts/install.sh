@@ -11,6 +11,8 @@
 # Variáveis: TALK_DIR (onde fica o código, padrão ~/.local/src/talk),
 # CUDA_ARCH (padrão: a da placa, pelo nvidia-smi), TALK_MODEL=turbo para o
 # modelo mais rápido (1,3 GB) em vez do large-v3 q5 (1,1 GB, mais preciso).
+# TALK_SPEECH=1 instala também a fala (`talk-rs speak`, ~3 GB a mais); quem já
+# tem a fala a mantém atualizada sem pedir, e TALK_SPEECH=0 pula sempre.
 # TALK_UPDATE=1 é o modo da atualização pela bandeja (`talk-rs update`): roda
 # sem terminal, então nunca pede sudo, e avisa no fim por notificação.
 
@@ -96,9 +98,12 @@ fi
 
 # 6b. A fala (`talk-rs speak`): o Qwen3-TTS só roda em Python, num ambiente
 #     próprio. As versões vão fixas: o transformers 5.24 quebra o modelo.
-#     TALK_SPEECH=0 pula.
+#     Opcional: só com TALK_SPEECH=1, ou se a fala já está instalada (aí a
+#     atualização a mantém em dia). TALK_SPEECH=0 pula sempre.
 SPEECH="${XDG_CACHE_HOME:-$HOME/.cache}/talk/speech"
-if [[ "${TALK_SPEECH:-1}" != 0 ]]; then
+want_speech=${TALK_SPEECH:-}
+[[ -z "$want_speech" && -x "$SPEECH/venv/bin/python" ]] && want_speech=1
+if [[ "$want_speech" == 1 ]]; then
     if ! command -v uv >/dev/null && [[ ! -x "$BIN/uv" ]]; then
         say "instalando o uv (o Python da fala)"; curl -LsSf https://astral.sh/uv/install.sh | sh
     fi
