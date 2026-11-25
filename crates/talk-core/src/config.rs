@@ -56,6 +56,9 @@ pub struct Config {
     /// O Python do ambiente com o `faster-qwen3-tts`. Vazio = o que o
     /// `install.sh` cria em `~/.cache/talk/speech/venv`.
     pub speech_python: String,
+    /// `focus`: a fala de uma conversa do T3 espera a janela do T3 estar em
+    /// foco mostrando aquela conversa (no COSMIC); `always`: fala na hora.
+    pub speech_when: String,
 }
 
 /// O Super+D é do Windows (mostra a área de trabalho) e não pode ser registrado.
@@ -90,6 +93,7 @@ impl Default for Config {
             speech_voice_en: "ryan".into(),
             speech_keep_alive: "30m".into(),
             speech_python: String::new(),
+            speech_when: "focus".into(),
         }
     }
 }

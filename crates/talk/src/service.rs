@@ -40,11 +40,14 @@ pub struct Request {
     /// Só no `speak`: o que falar.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub text: Option<String>,
+    /// Só no `speak`: o título da conversa do T3 que falou, se veio de uma.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thread: Option<String>,
 }
 
 impl Request {
     pub fn new(cmd: &str) -> Self {
-        Self { cmd: cmd.into(), language: None, text: None }
+        Self { cmd: cmd.into(), language: None, text: None, thread: None }
     }
 }
 
@@ -67,6 +70,9 @@ pub struct Reply {
     pub speaking: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub speech_loaded: Option<bool>,
+    /// Falas de conversas do T3 esperando a janela ganhar foco.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub speech_waiting: Option<usize>,
 }
 
 fn event_phase(phase: &str, seconds: u64) -> String {
@@ -245,7 +251,7 @@ impl Service {
             Phase::Idle => {
                 // Começar a falar cala o talk: dá para interromper o Claude no meio.
                 #[cfg(unix)]
-                self.speech.hush();
+                self.speech.stop();
                 let cfg = Config::load(&paths::config_file()).unwrap_or_default();
                 let target = (!cfg.input_device.is_empty()).then_some(cfg.input_device.as_str());
                 let capture = match Capture::start(target) {
@@ -461,12 +467,20 @@ impl Service {
                 speaking: Some(self.speech.speaking()),
                 #[cfg(unix)]
                 speech_loaded: Some(self.speech.loaded()),
+                #[cfg(unix)]
+                speech_waiting: Some(self.speech.waiting()),
                 ..Reply::default()
             },
             #[cfg(unix)]
             "speak" => match req.text.filter(|t| !t.trim().is_empty()) {
                 Some(text) => {
-                    self.speech.enqueue(text);
+                    match req.thread.filter(|t| !t.trim().is_empty()) {
+                        Some(thread) => {
+                            let cfg = Config::load(&paths::config_file()).unwrap_or_default();
+                            self.speech.enqueue_for_thread(thread, text, &cfg.speech_when);
+                        }
+                        None => self.speech.enqueue(text),
+                    }
                     Reply { ok: true, phase: lock(&self.phase).name().into(), ..Reply::default() }
                 }
                 None => Reply { ok: false, error: Some("nada para falar".into()), ..Reply::default() },

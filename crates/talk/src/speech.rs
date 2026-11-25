@@ -6,6 +6,7 @@
 //! VRAM. As falas entram numa fila e saem uma depois da outra; `hush` (ou
 //! começar uma ditada) corta a que está tocando e esvazia a fila.
 
+use std::collections::HashMap;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::io::{BufReader, BufWriter, Write};
@@ -105,7 +106,17 @@ pub struct Speech {
     /// O `pw-play` tocando agora: o `hush` o mata e o som para na hora.
     player: Arc<Mutex<Option<Child>>>,
     worker: Arc<Mutex<Option<Worker>>>,
+    /// A fala de cada conversa do T3 que espera a janela dela ganhar foco: só
+    /// a última de cada uma, que a anterior já envelheceu.
+    pending: Arc<Mutex<HashMap<String, (String, Instant)>>>,
+    /// O título da janela do T3 em foco, ou `None`.
+    focused: Arc<Mutex<Option<String>>>,
+    /// O vigia do foco subiu (é o COSMIC). Sem ele, `focus` vira `always`.
+    watching: Arc<AtomicBool>,
 }
+
+/// Uma fala esperando o foco há mais que isto já não interessa.
+const PENDING_TTL: Duration = Duration::from_secs(3600);
 
 impl Speech {
     pub fn start() -> Self {
@@ -116,6 +127,9 @@ impl Speech {
             speaking: Arc::new(AtomicBool::new(false)),
             player: Arc::new(Mutex::new(None)),
             worker: Arc::new(Mutex::new(None)),
+            pending: Arc::new(Mutex::new(HashMap::new())),
+            focused: Arc::new(Mutex::new(None)),
+            watching: Arc::new(AtomicBool::new(false)),
         };
         let speaker = me.clone();
         thread::spawn(move || {
@@ -131,7 +145,49 @@ impl Speech {
             }
         });
         me.reap();
+        let watcher = me.clone();
+        match crate::focus::watch(Box::new(move |w| watcher.on_focus(w))) {
+            Ok(()) => me.watching.store(true, Ordering::SeqCst),
+            Err(e) => eprintln!("[speech] sem vigia do foco ({e:#}): as falas tocam na hora"),
+        }
         me
+    }
+
+    /// A fala de uma conversa do T3 (`thread` é o título dela). Com
+    /// `speech_when = "focus"`, só toca se a janela do T3 está em foco
+    /// mostrando a conversa; senão espera ela ganhar foco.
+    pub fn enqueue_for_thread(&self, thread: String, text: String, when: &str) {
+        let shown = lock(&self.focused).as_deref().is_some_and(|w| speech::window_shows_thread(w, &thread));
+        if when != "focus" || !self.watching.load(Ordering::SeqCst) || shown {
+            self.enqueue(text);
+            return;
+        }
+        let mut pending = lock(&self.pending);
+        pending.retain(|_, (_, at)| at.elapsed() < PENDING_TTL);
+        eprintln!("[speech] esperando o foco: {}", hash(&thread));
+        pending.insert(thread, (text, Instant::now()));
+    }
+
+    /// O vigia avisou: o foco mudou. Se a janela agora mostra uma conversa
+    /// com fala esperando, ela toca.
+    fn on_focus(&self, window: Option<&str>) {
+        *lock(&self.focused) = window.map(str::to_owned);
+        let Some(window) = window else { return };
+        let mut pending = lock(&self.pending);
+        let ready: Vec<String> =
+            pending.keys().filter(|t| speech::window_shows_thread(window, t)).cloned().collect();
+        for thread in ready {
+            if let Some((text, at)) = pending.remove(&thread)
+                && at.elapsed() < PENDING_TTL
+            {
+                self.enqueue(text);
+            }
+        }
+    }
+
+    /// Quantas falas esperam o foco (para o `status`).
+    pub fn waiting(&self) -> usize {
+        lock(&self.pending).len()
     }
 
     /// Põe na fila e volta logo: quem chama (o Claude) não espera a fala acabar.
@@ -140,8 +196,15 @@ impl Speech {
         let _ = self.queue.send(Utterance { text, generation });
     }
 
-    /// Cala: corta o som agora e descarta a fila.
+    /// `talk-rs hush`: cala e descarta também o que esperava o foco.
     pub fn hush(&self) {
+        lock(&self.pending).clear();
+        self.stop();
+    }
+
+    /// Corta o som agora e descarta a fila (começar uma ditada faz isto). O
+    /// que espera o foco de uma conversa continua esperando.
+    pub fn stop(&self) {
         self.generation.fetch_add(1, Ordering::SeqCst);
         if let Some(mut p) = lock(&self.player).take() {
             let _ = p.kill();

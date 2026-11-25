@@ -20,7 +20,11 @@ mod remote;
 mod service;
 mod stt;
 #[cfg(unix)]
+mod focus;
+#[cfg(unix)]
 mod speech;
+#[cfg(unix)]
+mod t3;
 #[cfg_attr(windows, path = "tray_win.rs")]
 mod tray;
 mod update;
@@ -123,7 +127,12 @@ fn main() -> Result<()> {
             } else {
                 text.join(" ")
             };
-            let reply = service::request(&service::Request { text: Some(text), ..service::Request::new("speak") })?;
+            let reply = service::request(&service::Request {
+                text: Some(text),
+                // Chamado de dentro de uma conversa do T3: a fala espera a janela dela.
+                thread: t3::current_thread_title(),
+                ..service::Request::new("speak")
+            })?;
             if let Some(e) = reply.error {
                 bail!("{e}");
             }
@@ -136,10 +145,14 @@ fn main() -> Result<()> {
         }
         Cmd::Status => {
             let reply = service::request(&service::Request::new("status"))?;
-            match reply.speaking {
-                Some(true) => println!("{} (falando)", reply.phase),
-                _ => println!("{}", reply.phase),
+            let mut line = reply.phase.clone();
+            if reply.speaking == Some(true) {
+                line.push_str(" (falando)");
             }
+            if let Some(n @ 1..) = reply.speech_waiting {
+                line.push_str(&format!(" ({n} fala(s) esperando o foco)"));
+            }
+            println!("{line}");
             Ok(())
         }
     }

@@ -125,6 +125,13 @@ pub fn detect_language(text: &str) -> &'static str {
     if en > pt { "en" } else { "pt" }
 }
 
+/// A janela do T3 mostra a conversa `thread`? O título da janela é
+/// "Projeto / Conversa" (ou só a conversa, sem projeto).
+pub fn window_shows_thread(window_title: &str, thread_title: &str) -> bool {
+    let thread = thread_title.trim();
+    !thread.is_empty() && (window_title == thread || window_title.ends_with(&format!(" / {thread}")))
+}
+
 /// Uma frase para o trabalhador da fala, numa linha JSON.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Say {
@@ -224,5 +231,14 @@ mod tests {
         let (c, a) = read_chunk(&mut r).unwrap();
         assert!(c.done && a.is_empty() && c.error.is_none());
         assert!(read_chunk(&mut r).is_err());
+    }
+
+    #[test]
+    fn knows_which_t3_conversation_the_window_shows() {
+        let w = "No project / Add TTS Voice Output to T3 Code";
+        assert!(window_shows_thread(w, "Add TTS Voice Output to T3 Code"));
+        assert!(!window_shows_thread(w, "Voice Output to T3 Code"));
+        assert!(!window_shows_thread(w, ""));
+        assert!(window_shows_thread("Sem projeto", "Sem projeto"));
     }
 }
