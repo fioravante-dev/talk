@@ -522,6 +522,17 @@ impl Service {
                 self.speech.hush();
                 Reply { ok: true, phase: lock(&self.phase).name().into(), ..Reply::default() }
             }
+            // `talk-rs hush --or-again` (o R1 do controle): falando, cala;
+            // calado, fala de novo a última.
+            "hush-or-again" => {
+                let ok = if self.speech.speaking() {
+                    self.speech.hush();
+                    true
+                } else {
+                    self.speech.replay()
+                };
+                Reply { ok, phase: lock(&self.phase).name().into(), ..Reply::default() }
+            }
             // A janela mudou as teclas no config: no Windows elas são do
             // serviço e precisam ser registradas de novo (no Linux, do COSMIC,
             // que relê o arquivo sozinho).

@@ -118,8 +118,10 @@ Qwen3-TTS 0.6B.
   som e sobe a geração; a fala de agora e a fila terminam de ser geradas em
   silêncio e vão para o histórico. Enquanto `set_dictating(true)`, nada toca e
   o que espera o foco continua esperando. `hush()` também esvazia as que
-  esperam. `speech_enabled = false` (bandeja, Ajustes, `talk-rs speech off`)
-  faz o `speak` não gerar nada.
+  esperam. `talk-rs hush --or-again` faz o mesmo que o clique no ícone:
+  falando, cala; calado, fala de novo a última (o R1 do controle, pelo `pad`).
+  `speech_enabled = false` (bandeja, Ajustes, `talk-rs speech off`) faz o
+  `speak` não gerar nada.
 - Histórico: `~/.cache/talk/speech/spoken.jsonl` (texto, para sempre) e
   `clips/<id>.wav` (áudio, `speech_audio_keep = "7d"`, até
   `speech_audio_max_mb = 200`). Sem o áudio, `talk-rs again <id>` gera de novo.

@@ -73,7 +73,11 @@ enum Cmd {
         text: Vec<String>,
     },
     /// Cala a fala de agora e esvazia a fila.
-    Hush,
+    Hush {
+        /// Calado, fala de novo a última fala (como o clique no ícone).
+        #[arg(long)]
+        or_again: bool,
+    },
     /// Liga ou desliga a fala (o mesmo que "Fala ligada" na bandeja).
     Speech {
         #[arg(value_parser = ["on", "off"])]
@@ -161,8 +165,14 @@ fn main() -> Result<()> {
             }
             Ok(())
         }
-        Cmd::Hush => {
+        Cmd::Hush { or_again: false } => {
             service::request(&service::Request::new("hush"))?;
+            Ok(())
+        }
+        Cmd::Hush { or_again: true } => {
+            if !service::request(&service::Request::new("hush-or-again"))?.ok {
+                bail!("ainda não há fala para repetir");
+            }
             Ok(())
         }
         Cmd::Status => {
